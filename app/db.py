@@ -12,8 +12,8 @@ from __future__ import annotations
 import math
 import re
 from importlib.util import find_spec
-from typing import Any, Dict, List, Tuple, Optional
-from urllib.parse import quote_plus
+from typing import Any, Dict, List, Tuple
+from urllib.parse import quote, quote_plus
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
@@ -72,7 +72,9 @@ def build_engine_url(ds: Dict[str, Any]) -> str:
         pairs = [(k, v) for k, v in merged.items() if v not in (None, "")]
         if not pairs:
             return ""
-        return "?" + "&".join(f"{k}={v}" for k, v in pairs)
+        # Values are user-supplied (charset, tds_version, …) and can contain
+        # spaces or '&'; percent-encode so the URL stays one valid query string.
+        return "?" + "&".join(f"{k}={quote(str(v), safe='')}" for k, v in pairs)
 
     if dtype == "mysql":
         return f"mysql+pymysql://{user}:{pwd}@{host}:{port or 3306}/{db}{qs({'charset': params.get('charset', 'utf8mb4')})}"
@@ -100,7 +102,7 @@ def build_engine_url(ds: Dict[str, Any]) -> str:
         # needed. database may be a SID or a service name; caller decides.
         service = params.get("service_name")
         if service:
-            return f"oracle+oracledb://{user}:{pwd}@{host}:{port or 1521}/?service_name={service}"
+            return f"oracle+oracledb://{user}:{pwd}@{host}:{port or 1521}/?service_name={quote(str(service), safe='')}"
         return f"oracle+oracledb://{user}:{pwd}@{host}:{port or 1521}/{db}"
     if dtype == "mssql":
         # pymssql wheels bundle FreeTDS: no unixODBC / msodbcsql system
@@ -482,9 +484,13 @@ def precheck_sql(sql: str) -> Tuple[bool, str]:
     # Balanced parentheses & quotes
     if stripped.count("(") != stripped.count(")"):
         return False, "圆括号不匹配"
-    # Only count quotes outside comments; simplistic but useful.
-    single = stripped.count("'") - stripped.count("\\'")
-    if single % 2 != 0:
+    # Count quotes only after stripping line comments (a stray apostrophe in a
+    # -- comment must not be mistaken for an unterminated string). Also remove
+    # backslash-escaped quotes and SQL-doubled quotes ('').
+    no_comments = re.sub(r"--[^\n]*", "", stripped)
+    no_comments = re.sub(r"(?m)#[^\n]*", "", no_comments)  # MySQL # comments
+    no_comments = no_comments.replace("\\'", "").replace("''", "")
+    if no_comments.count("'") % 2 != 0:
         return False, "单引号不闭合"
 
     return True, ""
@@ -503,8 +509,14 @@ def build_paginated_sql(sql: str, dtype: str, offset: int, limit: int) -> str:
     if dtype in ("mysql", "mariadb", "postgresql", "opengauss", "highgo", "vastbase",
                  "kingbase", "oceanbase", "tidb", "gbase"):
         return f"SELECT * FROM ({body}) AS __t LIMIT {limit} OFFSET {offset}"
-    if dtype in ("oracle", "mssql", "db2"):
-        # Standard SQL:2008 syntax - Oracle 12c+, SQL Server 2012+, DB2 11+
+    if dtype == "mssql":
+        # SQL Server 2012+ syntax. OFFSET requires a preceding ORDER BY —
+        # ORDER BY (SELECT NULL) is the documented constant-expression escape
+        # for queries that don't have a meaningful ordering.
+        return (f"SELECT * FROM ({body}) __t ORDER BY (SELECT NULL) "
+                f"OFFSET {offset} ROWS FETCH NEXT {limit} ROWS ONLY")
+    if dtype in ("oracle", "db2"):
+        # SQL:2008 syntax - Oracle 12c+, DB2 11+ (neither requires ORDER BY)
         return f"SELECT * FROM ({body}) __t OFFSET {offset} ROWS FETCH NEXT {limit} ROWS ONLY"
     if dtype in ("dm",):
         return f"SELECT * FROM ({body}) __t LIMIT {limit} OFFSET {offset}"

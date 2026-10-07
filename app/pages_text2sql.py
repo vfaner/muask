@@ -42,6 +42,9 @@ class Text2SQLPage(QWidget):
         self._current_page = 1
         self._page_size = cfg.get_page_size()
         self._total_rows = 0
+        # True when the COUNT(*) wrap failed: a placeholder total drives
+        # pagination, but the UI shows "?" instead of claiming a number.
+        self._count_unknown = False
         self._last_sql = ""
 
         self._build_ui()
@@ -220,12 +223,6 @@ class Text2SQLPage(QWidget):
         else:
             self._set_schema_status("idle" if current else "none")
 
-    def refresh_page_size(self) -> None:
-        self._page_size = self.cfg.get_page_size()
-        self.page_size_edit.blockSignals(True)
-        self.page_size_edit.setText(str(self._page_size))
-        self.page_size_edit.blockSignals(False)
-
     def refresh_ai_configs(self) -> None:
         """Reload the AI-config dropdown from ConfigManager."""
         current = self.cfg.data.get("current_ai_config", "") or ""
@@ -269,7 +266,8 @@ class Text2SQLPage(QWidget):
         page_size = max(1, self._page_size)
         total = max(0, self._total_rows)
         pages = max(1, (total + page_size - 1) // page_size) if total > 0 else 0
-        self.page_label.setText(f"第 {self._current_page if pages else 0} / {pages} 页  (共 {total if total >=0 else '?'} 条)")
+        shown_total = "?" if self._count_unknown else (total if total >= 0 else "?")
+        self.page_label.setText(f"第 {self._current_page if pages else 0} / {pages} 页  (共 {shown_total} 条)")
         self.btn_prev.setEnabled(self._current_page > 1 and total > 0)
         self.btn_next.setEnabled(self._current_page < pages)
 
@@ -400,7 +398,10 @@ class Text2SQLPage(QWidget):
             toast.warning(self, "请先输入自然语言描述")
             return
         ai_cfg = self._current_ai_cfg() or self.cfg.get_current_ai_config()
-        if not ai_cfg or not ai_cfg.get("api_key") or not ai_cfg.get("api_base") or not ai_cfg.get("model"):
+        # Ollama 是本地推理，OpenAI 兼容端点不校验 key，允许留空
+        needs_key = (ai_cfg or {}).get("provider") != "ollama"
+        if not ai_cfg or not ai_cfg.get("api_base") or not ai_cfg.get("model") \
+                or (needs_key and not ai_cfg.get("api_key")):
             toast.warning(self, "请先在“AI 配置”中新建并选中一份可用的配置")
             return
 
@@ -521,11 +522,26 @@ class Text2SQLPage(QWidget):
 
         def sel_ok(cols: List[str], rows: List[Any], total: int) -> None:
             self._finish_exec()
-            self._total_rows = total if isinstance(total, int) else 0
+            total = total if isinstance(total, int) else 0
+            self._count_unknown = False
+            # COUNT wrapping failed (some queries don't support it). Use a
+            # placeholder total so paging still works (full page → maybe a next
+            # page; partial → this is the last), but display "?" not a number.
+            if total < 0:
+                self._count_unknown = True
+                total = self._current_page * self._page_size
+                if len(rows) >= self._page_size:
+                    total += 1
+            self._total_rows = total
             self._show_table(cols, rows)
             self._update_pagination_ui()
             msg = f"查询成功，本页 {len(rows)} 条"
-            if total >= 0:
+            if self._count_unknown:
+                if self.btn_next.isEnabled():
+                    msg += "，总数未知（可继续翻页）"
+                else:
+                    msg += "，总数未知（已是最后一页）"
+            else:
                 msg += f"，共 {total} 条"
             self.result_message.setText(msg)
             self.status_message.emit(msg)
@@ -568,6 +584,7 @@ class Text2SQLPage(QWidget):
         self.result_table.setRowCount(0)
         self.result_table.setColumnCount(0)
         self._total_rows = 0
+        self._count_unknown = False
         self._update_pagination_ui()
         self.result_message.setText(message)
 

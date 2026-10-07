@@ -156,4 +156,11 @@ class MainWindow(QMainWindow):
         updater = getattr(self.title_bar, "_updater", None)
         if updater is not None and updater.isRunning():
             updater.wait(2000)
+        # In-flight AI / SQL / schema threads too — don't let Qt destroy a
+        # QThread that is still running ("QThread: Destroyed while running").
+        page = self.text2sql_page
+        pending = [page._ai_worker, page._sql_worker, *page._schema_workers]
+        for worker in pending:
+            if worker is not None and worker.isRunning():
+                worker.wait(2000)
         super().closeEvent(event)

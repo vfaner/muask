@@ -50,22 +50,6 @@ def _render_svg_icon(svg_path: str, size: int = 20, color: str = "#ffffff") -> Q
     return QIcon(pix)
 
 
-def _make_github_icon(size: int = 20, color: str = "#ffffff") -> QIcon:
-    """Real Octicon mark-github logo, loaded from assets/github.svg."""
-    icon = _render_svg_icon(os.path.join(ASSETS_DIR, "github.svg"), size=size, color=color)
-    if icon.isNull():
-        # Fallback (shouldn't happen — the svg is bundled)
-        pix = QPixmap(size, size)
-        pix.fill(Qt.transparent)
-        p = QPainter(pix)
-        p.setBrush(QColor(color))
-        p.setPen(Qt.NoPen)
-        p.drawEllipse(0, 0, size, size)
-        p.end()
-        return QIcon(pix)
-    return icon
-
-
 def _make_donate_icon(size: int = 20, color: str = "#ffffff") -> QIcon:
     """Load the donate icon from assets/donate.png, tinted to `color`.
 

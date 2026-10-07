@@ -42,8 +42,23 @@ IS_WINDOWS = sys.platform == "win32"
 _init = Path("app/__init__.py").read_text(encoding="utf-8")
 VERSION = re.search(r'__version__\s*=\s*"([^"]+)"', _init).group(1)
 
-# Bundle the whole assets directory; app/paths.py resolves it via sys._MEIPASS.
-datas = [("assets", "assets")]
+# Only the assets the app actually loads at runtime. Bundling the whole
+# directory used to ship ~4 MB of README screenshots, the cover image, the
+# icon source and the other platforms' icon formats for nothing. app/paths.py
+# resolves these via sys._MEIPASS.
+_RUNTIME_ASSETS = [
+    "app_icon.png",   # window/taskbar icon (main.py)
+    "tag.svg",        # version-pill icon
+    "donate.png",     # donate button glyph
+    "alipay.png",     # donate dialog QR
+    "wechat.png",
+    "qq.png",
+]
+if IS_MACOS:
+    _RUNTIME_ASSETS.append("app_icon.icns")  # Finder/Dock reads it from the bundle
+if IS_WINDOWS:
+    _RUNTIME_ASSETS.append("app_icon.ico")   # embedded in the executable
+datas = [(f"assets/{name}", "assets") for name in _RUNTIME_ASSETS]
 binaries = []
 
 # SQLAlchemy dialects import their driver modules lazily, so the drivers are

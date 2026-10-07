@@ -21,8 +21,8 @@ from . import __version__
 
 
 # Public release endpoints. Gitee is the China-side mirror; its releases are
-# kept in sync with GitHub (see scripts/sync_gitee_release.sh). Until the first
-# Gitee release exists, that endpoint 404s and we fall through silently.
+# kept in sync with GitHub. Until a Gitee release exists, that endpoint 404s
+# and we fall through silently.
 GITHUB_LATEST_API = "https://api.github.com/repos/vfaner/muask/releases/latest"
 GITEE_LATEST_API = "https://gitee.com/api/v5/repos/super_rgh/muask/releases/latest"
 

@@ -1,59 +1,148 @@
 # 沐问 MuAsk
 
-[English](./README.en.md) | 简体中文
+<p align="center">
+  <a href="https://gitee.com/super_rgh/muask/stargazers"><img src="https://gitee.com/super_rgh/muask/badge/star.svg?theme=gvp" alt="Gitee stars"></a>
+  <a href="https://gitee.com/super_rgh/muask/members"><img src="https://gitee.com/super_rgh/muask/badge/fork.svg?theme=gvp" alt="Gitee forks"></a>
+  <a href="https://github.com/vfaner/muask/stargazers"><img src="https://img.shields.io/github/stars/vfaner/muask?label=GitHub%20stars&logo=github" alt="GitHub stars"></a>
+  <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License: MIT">
+  <img src="https://img.shields.io/github/v/release/vfaner/muask?label=release&color=2c7be5" alt="Latest release">
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-2c7be5" alt="Platforms">
+</p>
 
-一款基于 PySide6 的桌面应用，通过**自然语言描述 → AI 生成 SQL → 在数据库执行并展示结果**。支持主流数据库和信创数据库，兼容多个主流 AI 大模型。
+<p align="center">
+  <b>开源免费的桌面 Text2SQL 工具：中文一句话，SQL 自动生成、一键执行。</b><br>
+  读取真实表结构与中文注释，让不熟悉库表的人也能立刻查数据。
+</p>
+
+<p align="center">
+  <a href="#quickstart">快速开始</a> ·
+  <a href="#features">功能特性</a> ·
+  <a href="#databases">支持数据库</a> ·
+  <a href="#architecture">技术架构</a> ·
+  <a href="#contributing">贡献与反馈</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/vfaner/muask">GitHub</a> ·
+  <a href="https://gitee.com/super_rgh/muask">Gitee</a> ·
+  <a href="https://muask.qqmu.com">官网</a> ·
+  <a href="https://www.bilibili.com/video/BV1HvY369EVe/">视频演示</a> ·
+  <a href="https://github.com/vfaner/muask/releases">更新日志</a>
+</p>
+
+[English](./README.en.md) | 简体中文
 
 ![沐问 MuAsk 封面](assets/muwen.png)
 
-### 项目地址
+---
 
-| 平台 | 地址 |
-|------|------|
-| GitHub | https://github.com/vfaner/muask |
-| Gitee（国内镜像） | https://gitee.com/super_rgh/muask |
+<a id="intro" name="intro"></a>
 
-### 联系方式
+## 📌 项目简介
 
-使用中遇到问题、有好点子或想提需求，欢迎联系我们：
+接手一个成熟项目时，数据库里往往有几百上千张表，却缺少完整的文档：表关系与字段含义散落在代码和老员工的记忆里，临时查一条数据就要翻代码、问同事、手写一大段 SQL。
 
-| 方式 | 号码 |
-|------|------|
-| QQ | 817094 / 2912167928 |
-| QQ 群 | 426669837 |
-| 微信 | qqmu66 |
+**沐问 MuAsk** 就是为这个场景做的。它是一款基于 **PySide6** 的桌面数据库查询工具，把「自然语言 → SQL → 执行」整条链路做成开箱即用的客户端：
 
-如果对你有帮助，欢迎 **Star ⭐**
+1. 选中数据源后，自动读取数据库中**真实的表名、字段、主外键和中文注释**；
+2. 你用中文描述需求（如「查询三年级数学 60 分以上的学生」），AI 在真实表结构内生成 SQL；
+3. SQL 经本地预检后展示在编辑区，可人工核对、修改，再一键执行并以表格 + 分页查看结果。
+
+| 项目信息 | 说明 |
+|---|---|
+| 项目定位 | 面向开发、测试、运维、数据分析的桌面 Text2SQL 客户端 |
+| 最新版本 | **v1.4.1**（2026-10-07） |
+| 运行环境 | Windows x64 / macOS (Apple Silicon) / Linux x86_64，安装包**无需 Python** |
+| 数据库支持 | 14 类数据库内置驱动，含达梦、人大金仓、瀚高、海量、OceanBase、TiDB、GBase 8a 等信创库 |
+| AI 支持 | OpenAI 兼容 `/chat/completions` 与 Anthropic 兼容 `/messages` 双协议，支持 Ollama 本地模型 |
+| 开源协议 | [MIT](./LICENSE) |
+
+**适用场景**
+
+- 接手老项目，数据库几百上千张表却没有文档，需要快速上手查数；
+- 临时取数、核对业务口径，不想为一条 SQL 翻代码、问同事；
+- 信创数据库环境，需要一个内置达梦 / 金仓 / 瀚高 / 海量 / GBase 驱动的轻量客户端；
+- 数据隐私敏感，希望使用本地 Ollama 模型，查询不出内网。
+
+> 💡 相比在线的 Text2SQL 服务，沐问是**本地桌面程序**：数据库连接信息与查询结果始终留在本机；除生成 SQL 所需的表结构外，不上传任何数据。
 
 ---
 
-## 💡 开发背景
+<a id="features" name="features"></a>
 
-相信不少人都遇到过这样的场景：
+## ✨ 功能特性
 
-- **刚入职的新人**，接手一个成熟项目，数据库里几百上千张表，却没有一份详细的数据库文档，想写个业务查询都不知道该从哪张表、哪个字段下手；
-- 项目迭代多年，**表与表之间的关系、字段含义**散落在代码和老员工的记忆里，开发、测试、运维想快速搞清楚一个业务的数据口径，往往要翻半天代码、问好几个人；
-- 哪怕只是临时查个数据，也得先搞懂表结构、手写一大段 SQL，门槛高、效率低。
-
-**沐问 MuAsk 就是为了解决这个痛点**：连上数据库后，工具自动读取真实的表结构、字段注释和主外键关系，你只需要用中文说出想查什么，AI 就会在**真实的表和字段**里生成可执行的 SQL 并直接返回结果——不用找表、不用问人、不用手写 SQL，让新人也能立刻上手查数据。
+| 特性 | 说明 |
+|---|---|
+| **Text2SQL** | 中文输入 → AI 生成 SQL → 本地预检（拦截散文、括号不匹配等）→ 可编辑 → 一键执行，SELECT 分页浏览 |
+| **真实表结构驱动** | 自动读取表、列、主外键与中文注释；表多时按问题相关性筛选（如「数学」「三年级」二元词组匹配），并提示已载入多少张表 |
+| **14 类数据库 · 驱动全内置** | 每种内置类型的驱动随安装包分发，开箱直连，不提示「缺少驱动包」；仅「其他（自定义）」需自备驱动 |
+| **多 AI 配置 · 一键切换** | 像数据源一样管理多份 AI 配置（新建 / 编辑 / 删除 / 测试 / 设为当前），主界面顶部随时切换 |
+| **双协议 · 多厂商** | OpenAI 兼容（OpenAI、DeepSeek、通义千问、豆包、Kimi、智谱、千帆等）与 Anthropic 兼容（Claude、火山方舟） |
+| **Ollama 本地模型** | 可选本地 Ollama（OpenAI 兼容端点），免 API Key、免外网，适合隐私敏感场景 |
+| **安全可控** | SQL 执行前完整展示、可手动修改；建议搭配只读账号使用，从权限层兜底 |
+| **友好错误处理** | 独立错误弹窗（可滚动 / 可关闭），保留完整报错，旧结果不残留 |
+| **现代化桌面 UI** | 无边框自绘标题栏、版本状态胶囊、自动更新检查、Toast 通知、SQL 语法高亮 |
+| **三平台原生打包** | Windows 单文件 exe、macOS `.app` + DMG、Linux 单文件，CI 自动构建发布 |
 
 ---
 
-## 📦 直接下载可执行文件（无需 Python 环境）
+<a id="demo" name="demo"></a>
 
-不想折腾环境？直接到 **[Releases 页面](https://github.com/vfaner/muask/releases)** 下载对应平台的打包程序，不依赖 Python、不依赖任何库。Windows 和 macOS 首次运行都要手动放行一次（各一次，之后再无提示），步骤见下。
+## 🎬 演示与界面预览
+
+> 🎬 **视频演示（约 11 分钟）**：[告别手写 SQL！配置即用的开源 Text2SQL 工具，无需指定表名，AI 自动读表注释生成可执行语句！](https://www.bilibili.com/video/BV1HvY369EVe/)（B 站）
+
+### Text2SQL 主界面
+
+![Text2SQL 主界面](assets/text2sql.png)
+
+### 数据源配置
+
+![数据源配置](assets/db_config.png)
+
+### 新增数据源
+
+![新增数据源](assets/db_config_add.png)
+
+### AI 配置
+
+![AI 配置](assets/ai_config.png)
+
+### 软件说明
+
+![软件说明](assets/soft_method.png)
+
+### 关于我们
+
+![关于我们](assets/about_me.png)
+
+---
+
+<a id="quickstart" name="quickstart"></a>
+
+## 🚀 快速开始
+
+### 方式一：下载安装包（推荐，无需 Python 环境）
 
 | 平台 | 下载文件 | 使用方式 |
-|------|---------|----------|
-| **Windows x64** | `muask-windows-x86_64.exe` | 单文件，下载后直接双击运行。首次会被 SmartScreen 拦一次，见下方说明 |
-| **macOS (Apple Silicon)** | `muask-macos-arm64.dmg` | 挂载 → 拖到「应用程序」→ 双击。首次需放行一次，见下方说明 |
+|---|---|---|
+| **Windows x64** | `muask-windows-x86_64.exe` | 单文件，下载后直接双击运行；首次会被 SmartScreen 拦一次，见下方说明 |
+| **macOS (Apple Silicon)** | `muask-macos-arm64.dmg` | 挂载 → 拖到「应用程序」→ 双击；首次需放行一次，见下方说明 |
 | **Linux x64** | `muask-linux-x86_64.tar.gz` | `tar -xzvf ...tar.gz` → `chmod +x muask && ./muask` |
 
-> 🎬 **视频演示**：[告别手写 SQL！配置即用的开源 Text2SQL 工具，无需指定表名，AI 自动读表注释生成可执行语句！](https://www.bilibili.com/video/BV1HvY369EVe/)（B 站）
+**下载地址（双通道）**
 
-> 👉 **最新版本**：https://github.com/vfaner/muask/releases/latest
+- GitHub Releases（全部平台）：https://github.com/vfaner/muask/releases/latest
+- Gitee Releases（国内加速）：https://gitee.com/super_rgh/muask/releases
+
+> Gitee 单个附件限制 100 MB，Linux 包被拆成两个分卷。下载 `muask-linux-x86_64.tar.gz.part1` 和 `.part2` 后合并：
 >
-> 只有想改代码、二次开发或跑不同架构（如 Intel Mac）时才需要下面的“从源码运行”步骤。
+> ```bash
+> cat muask-linux-x86_64.tar.gz.part1 muask-linux-x86_64.tar.gz.part2 > muask-linux-x86_64.tar.gz
+> tar -xzvf muask-linux-x86_64.tar.gz
+> chmod +x muask && ./muask
+> ```
 
 ### 🪟 Windows 首次运行需放行一次
 
@@ -92,7 +181,7 @@ xattr -dr com.apple.quarantine /Applications/muask.app
 
 ### 🐧 Linux 运行说明
 
-Linux 没有类似的签名拦截，但 tar 解包后需要手动加执行权限（多数文件管理器也不会让你直接双击一个裸二进制）：
+Linux 没有类似的签名拦截，但 tar 解包后需要手动加执行权限：
 
 ```bash
 tar -xzvf muask-linux-x86_64.tar.gz
@@ -108,205 +197,42 @@ sudo apt-get install -y libgl1 libegl1 libxkbcommon-x11-0 libxcb-cursor0 \
   libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libdbus-1-3
 ```
 
----
+### 方式二：从源码运行
 
-## 界面预览
-
-> 🎬 **视频演示**：[告别手写 SQL！配置即用的开源 Text2SQL 工具，无需指定表名，AI 自动读表注释生成可执行语句！](https://www.bilibili.com/video/BV1HvY369EVe/)（B 站）
-
-### Text2SQL 核心页
-![Text2SQL 主界面](assets/text2sql.png)
-
-### 数据源配置
-![数据源配置](assets/db_config.png)
-
-### 新增数据源
-![新增数据源](assets/db_config_add.png)
-
-### AI 配置
-![AI 配置](assets/ai_config.png)
-
-### 软件说明
-![软件说明](assets/soft_method.png)
-
-### 关于我们
-![关于我们](assets/about_me.png)
-
----
-
-## 功能亮点
-
-- **Text2SQL**：自然语言输入 → AI 生成 SQL → **自动预检**（防止 AI 返回散文 / 括号不匹配等）→ 手动可编辑 → 一键执行；查询以表格 + 分页展示，非查询显示受影响行数。
-- **基于真实表结构生成**：选中数据源后，应用会自动读取库中表、列、主外键和中文注释并随问题一起发给 AI —— AI 在你**真实的**表名 / 字段里做选择并按外键写 JOIN，而不是凭空猜 `student`、`score` 之类的名字。表很多时按问题相关性筛选（中文按二元词组匹配，如“数学”“三年级”），并在界面提示已载入多少张表。
-- **多数据库支持 · 驱动全部内置**：MySQL、MariaDB、PostgreSQL、OpenGauss、瀚高（HighGo）、海量（Vastbase）、人大金仓（KingbaseES）、OceanBase、TiDB、达梦（DM）、南大通用（GBase 8a）、Oracle、SQL Server、DB2，以及自定义 SQLAlchemy URL。**下拉中每种内置类型的驱动都随打包程序内置，开箱直连，不会提示“缺少驱动包”**；只有「其他（自定义）」需要自行准备驱动（平台例外见[已知局限](#已知局限)）。
-- **多 AI 配置 · 一键切换**：像数据源一样可以配置多份 AI（新建 / 编辑 / 删除 / 测试调用 / 设为当前），主界面顶部下拉切换。
-- **双协议 · 多厂商**：
-  - **OpenAI 兼容 `/chat/completions`**：OpenAI、阿里百炼、千问、火山引擎 ARK、豆包、DeepSeek、百度千帆（ERNIE）、智谱 GLM、Kimi（Moonshot）、胜算云、GitHub Copilot/Models，以及自定义。
-  - **Anthropic 兼容 `/messages`**：Anthropic Claude、火山引擎 ARK（与上面是同一个厂商，协议下拉切到 Anthropic 即可，地址自动改写），以及自定义。
-- **友好错误处理**：SQL 执行失败弹独立错误对话框（可关闭 / 可滚动），旧结果不会残留；错误摘要提取一行显示。
-- **配置管理**：数据源和 AI 配置持久化到 `config.json`；密码、API Key 使用 base64 编码存储；老配置自动迁移。
-- **现代化 UI**：自绘无边框标题栏、右上角版本状态胶囊（自动检查 GitHub / Gitee 更新）+ 捐赠按钮，Vue element-plus 风格的 Toast 通知，圆角、柔和配色，启动窗口自动居中。
-
----
-
-## 目录结构
-
-```
-muask/
-├── main.py                        # 应用入口
-├── requirements.txt               # 依赖清单
-├── config.example.json            # 示例配置
-├── README.md                      # 本文件（中文）
-├── README.en.md                   # 英文说明
-├── LICENSE                        # MIT 协议
-├── muask.spec        # PyInstaller 配置（macOS 出 .app，Win/Linux 出单文件）
-├── scripts/
-│   ├── build_macos.sh             # macOS 构建 + ad-hoc 签名 + 打 DMG
-│   ├── prepare_icon.py            # 从带背景的素材抠出透明底圆角母版
-│   └── make_icons.py              # 由母图生成 .icns / .ico
-├── assets/                        # 图标、二维码、截图
-│   ├── icon.jpg                   # 图标原始素材（换图时的输入）
-│   ├── app_icon.png               # 1024x1024 应用图标母图（由素材生成，也用作 Qt 窗口图标）
-│   ├── app_icon.icns              # macOS bundle 图标（由母图生成）
-│   ├── app_icon.ico               # Windows 可执行文件图标（由母图生成）
-│   ├── github.svg
-│   ├── tag.svg
-│   ├── donate.png
-│   ├── alipay.png
-│   ├── wechat.png
-│   ├── qq.png
-│   ├── text2sql.png
-│   ├── db_config.png
-│   ├── db_config_add.png
-│   ├── ai_config.png
-│   ├── soft_method.png
-│   └── about_me.png
-└── app/
-    ├── __init__.py
-    ├── paths.py                   # 资源/配置路径解析（源码 vs 打包、可写用户目录）
-    ├── config.py                  # config.json 读写 + DB/AI 列表 + base64 编码
-    ├── db.py                      # SQLAlchemy URL 构造 + 各方言分页 + SQL 执行 + 预检
-    ├── db_dialects.py             # 达梦 / 人大金仓的 SQLAlchemy 方言适配（dm+dmpython / kingbase+ksycopg2）
-    ├── ai_providers.py            # AI 适配层（OpenAI + Anthropic 双协议）
-    ├── workers.py                 # 后台 QThread（AI 生成、DB 测试、SQL 执行）
-    ├── highlighter.py             # SQL 语法高亮
-    ├── styles.py                  # QSS 样式
-    ├── toast.py                   # Vue 风格 Toast 通知
-    ├── error_dialog.py            # 错误弹窗（可关闭 / 可滚动）
-    ├── title_bar.py               # 自定义标题栏（版本检查 / 捐赠 / 窗口控制）
-    ├── update_dialog.py           # 新版本提示弹窗
-    ├── updater.py                 # GitHub / Gitee 版本检查
-    ├── donate_dialog.py           # 打赏二维码弹窗
-    ├── pages_text2sql.py          # Text2SQL 页面
-    ├── pages_data_source.py       # 数据源配置页面
-    ├── pages_ai.py                # AI 配置页面（多份配置管理）
-    ├── pages_about.py             # 软件说明页面
-    ├── pages_about_us.py          # 关于我们页面
-    └── main_window.py             # 主窗口
-```
-
----
-
-## 安装
-
-1. Python 3.9+（本项目开发环境为 Python 3.14）
-2. 安装依赖：
+适合二次开发或使用 Intel Mac 等没有预编译包的架构：
 
 ```bash
+git clone https://gitee.com/super_rgh/muask.git
+cd muask
+
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-```
 
-`requirements.txt` 已包含下拉中所有内置类型所需的驱动：
-
-- **跨平台纯 Python / 自包含 wheel**（Windows / Linux / macOS 均可直接装）：`PyMySQL`（MySQL、MariaDB、OceanBase MySQL 租户、TiDB、GBase 8a）、`psycopg2-binary`（PostgreSQL、OpenGauss、瀚高 HighGo、海量 Vastbase，金仓的 PG 协议兜底）、`oracledb`（Oracle 纯 Python 瘦模式，**无需 Oracle Instant Client**）、`pymssql`（wheel 自带 FreeTDS，**无需安装 ODBC Driver**）、`ibm_db`（DB2，wheel 自带 clidriver 客户端）。
-- **信创原生驱动**：`dmpython`（达梦，wheel 自带达梦客户端库）+ `dmSQLAlchemy`（达梦官方 SQLAlchemy 方言）、`ksycopg2`（人大金仓官方驱动，自带 libkci）只有 Windows / Linux wheel，已用平台标记限定，macOS 上执行 `pip install` 会自动跳过，不影响安装。
-- 神通（ShenTong）官方只提供 JDBC / ODBC 驱动，没有可随程序分发的 Python 驱动，因此不在内置类型中，请用「其他（自定义）」接入。
-
----
-
-## 运行
-
-```bash
 python main.py
 ```
 
-窗口启动时自动居中于当前屏幕。
+要求 Python 3.9+（开发环境为 Python 3.14）。
+
+`requirements.txt` 已包含所有内置数据库驱动：
+
+- **跨平台纯 Python / 自包含 wheel**：`PyMySQL`（MySQL、MariaDB、OceanBase MySQL 租户、TiDB、GBase 8a）、`psycopg2-binary`（PostgreSQL、OpenGauss、瀚高、海量，金仓 PG 协议兜底）、`oracledb`（Oracle 瘦模式，无需 Instant Client）、`pymssql`（自带 FreeTDS，无需 ODBC）、`ibm_db`（DB2，自带 clidriver）。
+- **信创原生驱动**：`dmpython` + `dmSQLAlchemy`（达梦）、`ksycopg2`（人大金仓）仅有 Windows / Linux wheel，已用平台标记限定，macOS 上安装时自动跳过。
+
+### 三步开始查询
+
+1. **配置 AI**：「AI 配置」→ 新建 → 选厂商（自动填协议 / 地址 / 模型）→ 填 API Key → 测试调用 → 保存。可选 Ollama 本地模型，免 Key。
+2. **配置数据源**：「数据源配置」→ 新建 → 选数据库类型 → 填连接信息 → 测试连接 → 保存。
+3. **开口问**：回到「沐问」页，选择数据源与 AI 配置，输入中文需求 → **生成 SQL** → 核对/修改 → **执行 SQL**。
+
+> 未选择数据源时 AI 看不到表结构，只能凭占位名生成，请务必先选数据源并人工核对 SQL。
+> 「执行 SQL」按钮在未选择数据源时会置灰。
 
 ---
 
-## 使用步骤
+<a id="databases" name="databases"></a>
 
-1. 打开 **AI 配置**（可保存多份，随时切换）：
-   - 点 **新建** → 选厂商（会自动填协议、API 地址、默认模型）→ 补 API Key → **测试调用** 验证 → **保存当前**
-   - 需要多套配置（比如生产 / 测试、不同厂商对比）就重复上一步
-   - 在列表中选中某份 → 点 **设为当前使用** 即可切换（也可以在 Text2SQL 页顶部下拉直接切）
-2. 打开 **数据源配置**：点 **新建**，选数据库类型，填写连接信息 → **测试连接** → **保存当前**
-3. 回到 **Text2SQL**：
-   - 顶部选择数据源和要使用的 AI 配置；选中数据源后会自动读取表结构，提示“表结构：已载入 N 张表”（改了表结构可点“重新读取表结构”）
-   - 在“自然语言描述”中输入需求（例如 “查询三年级数学 60 分以上的学生信息”）
-   - 点 **生成 SQL** → AI 基于真实表名 / 字段生成，系统再做一次预检 → 通过后填入中间编辑区，可手动改
-   - 点 **执行 SQL** → 结果显示在下方；SELECT 支持分页翻页
-   - 若 SQL 执行失败，会弹出独立错误弹窗（有关闭按钮，可滚动查看完整报错），旧结果自动清空
-   - 提示：未选数据源时 AI 看不到表结构，只能凭占位名生成，请务必先选数据源并人工核对 SQL
-4. 详细使用说明也可以在应用内的 **软件说明** 页查看。
-
-“执行 SQL” 按钮在未选择数据源时会置灰。
-
----
-
-## 支持的 AI 厂商
-
-按接口协议分类：
-
-### OpenAI 兼容 `/chat/completions`
-
-| 厂商 | 默认 Base URL | 默认模型 |
-|------|--------------|---------|
-| OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
-| 阿里百炼（Qwen） | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-max` |
-| 千问（Qwen） | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` |
-| 火山引擎 ARK（Coding Plan） | `https://ark.cn-beijing.volces.com/api/coding/v3` | `ark-code-latest` |
-| 豆包（Doubao） | `https://ark.cn-beijing.volces.com/api/v3` | `doubao-pro-32k` |
-| DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` |
-| 百度千帆（ERNIE） | `https://qianfan.baidubce.com/v2` | `ernie-4.0-turbo-8k` |
-| 智谱 GLM | `https://open.bigmodel.cn/api/paas/v4` | `glm-4-plus` |
-| Kimi（Moonshot） | `https://api.moonshot.cn/v1` | `moonshot-v1-8k` |
-| 胜算云 | `https://router.shengsuanyun.com/api/v1` | `deepseek-chat` |
-| GitHub Copilot / Models | `https://models.inference.ai.azure.com` | `gpt-4o-mini` |
-| 兼容 OpenAI 协议（自定义） | 用户填写 | 用户填写 |
-
-### Anthropic 兼容 `/messages`
-
-| 厂商 | 默认 Base URL | 默认模型 |
-|------|--------------|---------|
-| Anthropic Claude | `https://api.anthropic.com/v1` | `claude-3-5-sonnet-latest` |
-| 火山引擎 ARK（同一厂商，切到 Anthropic 协议时自动填充） | `https://ark.cn-beijing.volces.com/api/coding` | `ark-code-latest` |
-| 兼容 Anthropic 协议（自定义） | 用户填写 | 用户填写 |
-
-> 选择厂商后，**协议**、**Base URL**、**默认模型** 会自动填充。火山方舟等同时支持两种协议的厂商在列表中只有一项，在“协议”下拉里切换时会**自动换成对应协议的 API 地址**；也可以手动切换协议对接不在预置列表中的第三方兼容网关（LiteLLM / OpenRouter 等）。
->
-> URL 拼接规则与官方 SDK 一致：OpenAI 地址需包含版本段（如 `…/api/coding/v3`，程序补 `/chat/completions`）；Anthropic 地址填到根即可（如 `…/api/coding`，与 Claude Code 的 `ANTHROPIC_BASE_URL` 写法相同，程序自动补 `/v1/messages`；若地址已以 `/v1` 结尾则只补 `/messages`）。
-
----
-
-## 配置文件
-
-配置文件位置取决于运行方式：
-
-| 运行方式 | `config.json` 位置 |
-|---------|-------------------|
-| 从源码运行 | 项目根目录（示例见 `config.example.json`） |
-| macOS 打包版 | `~/Library/Application Support/muask/` |
-| Windows 打包版 | `%APPDATA%\muask\` |
-| Linux 打包版 | `$XDG_CONFIG_HOME/muask/`（默认 `~/.config/…`） |
-
-打包版**不能**把配置写在程序目录里：macOS 的 `.app` 一旦被写入就会破坏代码签名导致无法启动，而单文件版的运行目录是临时目录、退出即删。旧版本正是因此每次重启都丢配置 —— 现在会自动把旧配置迁移到上表位置，无需手动搬。
-
-密码与 API Key 以 base64 编码存储（前缀 `b64:`），实用性大于安全性 —— 如需生产强度请自行改用 `cryptography` 加密。
-
----
-
-## 数据库与内置驱动
+## 🗄️ 支持的数据库
 
 下拉中的每种类型都由程序自动拼好连接串并**使用内置驱动**直连，无需自行安装任何驱动包：
 
@@ -318,15 +244,15 @@ python main.py
 | OpenGauss | psycopg2 | PG 协议（5432） | ✅ 内置 | ✅ 内置 |
 | 瀚高 HighGo | psycopg2 | 兼容 PG 协议（5866） | ✅ 内置 | ✅ 内置 |
 | 海量 Vastbase | psycopg2 | 兼容 PG 协议（5432） | ✅ 内置 | ✅ 内置 |
-| 人大金仓 KingbaseES | ksycopg2（官方，自带 libkci），psycopg2 兜底 | 54321 | ✅ 内置 | ✅ 自动走 PG 协议（psycopg2），多数 KingbaseES 实例可直连 |
+| 人大金仓 KingbaseES | ksycopg2（官方，自带 libkci），psycopg2 兜底 | 54321 | ✅ 内置 | ✅ 自动走 PG 协议，多数实例可直连 |
 | OceanBase | PyMySQL | MySQL 租户兼容 MySQL 协议（2881） | ✅ 内置 | ✅ 内置 |
 | TiDB | PyMySQL | 兼容 MySQL 协议（4000） | ✅ 内置 | ✅ 内置 |
 | Oracle | oracledb（瘦模式，无需 Instant Client） | `service_name` 或 SID（1521） | ✅ 内置 | ✅ 内置 |
 | SQL Server | pymssql（自带 FreeTDS，无需 ODBC） | TDS（1433） | ✅ 内置 | ✅ 内置 |
-| 达梦 DM | dmpython + dmSQLAlchemy（均为达梦官方，wheel 自带客户端库） | DM 协议（5236） | ✅ 内置 | ⚠️ 厂商无 macOS 驱动，请用 Windows / Linux 版连接 |
+| 达梦 DM | dmpython + dmSQLAlchemy（官方，wheel 自带客户端库） | DM 协议（5236） | ✅ 内置 | ⚠️ 厂商无 macOS 驱动 |
 | 南大通用 GBase 8a | PyMySQL | 兼容 MySQL 协议（5258） | ✅ 内置 | ✅ 内置 |
-| DB2 | ibm_db + ibm-db-sa（IBM 官方，wheel 自带 clidriver 客户端） | DB2 协议（50000） | ✅ 内置 | ✅ 内置 |
-| 其他（自定义） | 自备 | 在“连接参数”中填 `{"url": "..."}` | 自行安装驱动 | 自行安装驱动 |
+| DB2 | ibm_db + ibm-db-sa（IBM 官方，wheel 自带 clidriver） | DB2 协议（50000） | ✅ 内置 | ✅ 内置 |
+| 其他（自定义） | 自备 | 「连接参数」中填 `{"url": "..."}` | 自行安装驱动 | 自行安装驱动 |
 
 > **神通（ShenTong）/ 崖山 YashanDB / H2 未列入内置类型**：神通官方仅发布 JDBC / ODBC 驱动；崖山官方 Python 驱动不通过 PyPI 分发；H2 是纯 Java 引擎，必须本机装有 JVM 和 `h2.jar` 才能经 JDBC 桥接入——都与「开箱直连」目标冲突。需要连接时请选「其他（自定义）」，自行安装桥接驱动并提供 SQLAlchemy 连接串。OceanBase 的 **Oracle 租户**同理（MySQL 租户已内置）。
 
@@ -339,13 +265,144 @@ python main.py
 - SQL Server：`mssql+pymssql://user:pwd@host:1433/db`
 - DB2：`ibm_db_sa://user:pwd@host:50000/db`
 - 达梦：`dm+dmpython://user:pwd@host:5236/DAMENG`
-- 自定义：在数据源的“连接参数”中填入 `{"url": "your+dialect://..."}`。
+- 自定义：在数据源的「连接参数」中填入 `{"url": "your+dialect://..."}`。
 
 ---
 
-## 打包（可选）
+<a id="ai" name="ai"></a>
 
-打包配置集中在 `muask.spec`，按平台产出不同形态（不要用裸 `pyinstaller -F main.py`，会丢掉 assets 和 macOS 的 bundle 结构）：
+## 🤖 支持的 AI 厂商
+
+### OpenAI 兼容 `/chat/completions`
+
+| 厂商 | 默认 Base URL | 默认模型 |
+|---|---|---|
+| OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
+| 阿里百炼（Qwen） | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-max` |
+| 千问（Qwen） | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` |
+| 火山引擎 ARK（Coding Plan） | `https://ark.cn-beijing.volces.com/api/coding/v3` | `ark-code-latest` |
+| 豆包（Doubao） | `https://ark.cn-beijing.volces.com/api/v3` | `doubao-pro-32k` |
+| DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` |
+| 百度千帆（ERNIE） | `https://qianfan.baidubce.com/v2` | `ernie-4.0-turbo-8k` |
+| 智谱 GLM | `https://open.bigmodel.cn/api/paas/v4` | `glm-4-plus` |
+| Kimi（Moonshot） | `https://api.moonshot.cn/v1` | `moonshot-v1-8k` |
+| 胜算云 | `https://router.shengsuanyun.com/api/v1` | `deepseek-chat` |
+| GitHub Copilot / Models | `https://models.inference.ai.azure.com` | `gpt-4o-mini` |
+| **Ollama（本地）** | `http://localhost:11434/v1` | 本地已拉取的模型 |
+| 兼容 OpenAI 协议（自定义） | 用户填写 | 用户填写 |
+
+### Anthropic 兼容 `/messages`
+
+| 厂商 | 默认 Base URL | 默认模型 |
+|---|---|---|
+| Anthropic Claude | `https://api.anthropic.com/v1` | `claude-3-5-sonnet-latest` |
+| 火山引擎 ARK（切到 Anthropic 协议时自动填充） | `https://ark.cn-beijing.volces.com/api/coding` | `ark-code-latest` |
+| 兼容 Anthropic 协议（自定义） | 用户填写 | 用户填写 |
+
+> 选择厂商后，**协议**、**Base URL**、**默认模型** 会自动填充。火山方舟等同时支持两种协议的厂商在列表中只有一项，在「协议」下拉里切换时会**自动换成对应协议的 API 地址**；也可以手动切换协议对接不在预置列表中的第三方兼容网关（LiteLLM / OpenRouter 等）。
+>
+> URL 拼接规则与官方 SDK 一致：OpenAI 地址需包含版本段（如 `…/api/coding/v3`，程序补 `/chat/completions`）；Anthropic 地址填到根即可（如 `…/api/coding`，与 Claude Code 的 `ANTHROPIC_BASE_URL` 写法相同，程序自动补 `/v1/messages`；若地址已以 `/v1` 结尾则只补 `/messages`）。
+
+---
+
+<a id="config" name="config"></a>
+
+## ⚙️ 配置说明
+
+配置文件位置取决于运行方式：
+
+| 运行方式 | `config.json` 位置 |
+|---|---|
+| 从源码运行 | 项目根目录（示例见 `config.example.json`） |
+| macOS 打包版 | `~/Library/Application Support/muask/` |
+| Windows 打包版 | `%APPDATA%\muask\` |
+| Linux 打包版 | `$XDG_CONFIG_HOME/muask/`（默认 `~/.config/…`） |
+
+打包版**不能**把配置写在程序目录里：macOS 的 `.app` 一旦被写入就会破坏代码签名导致无法启动，而单文件版的运行目录是临时目录、退出即删。旧版本正是因此每次重启都丢配置 —— 现在会自动把旧配置迁移到上表位置，无需手动搬。
+
+密码与 API Key 以 base64 编码存储（前缀 `b64:`），实用性大于安全性 —— 如需生产强度请自行改用 `cryptography` 加密。
+
+---
+
+<a id="architecture" name="architecture"></a>
+
+## 🧱 技术架构
+
+### 技术栈
+
+| 层次 | 选型 |
+|---|---|
+| 桌面 UI | Python 3 / **PySide6**（Qt Widgets），QSS 自绘样式、无边框标题栏 |
+| 数据访问 | **SQLAlchemy** + 各数据库原生驱动；达梦 / 金仓使用项目内的 SQLAlchemy 方言适配 |
+| AI 接入 | `requests` 直连，**OpenAI `/chat/completions`** 与 **Anthropic `/messages`** 双协议适配层 |
+| 并发模型 | QThread 后台 Worker（AI 生成、连接测试、SQL 执行、表结构读取），UI 不阻塞 |
+| 配置存储 | 本地 `config.json`，跨平台用户目录，旧配置自动迁移 |
+| 打包发布 | **PyInstaller**（Windows / Linux 单文件，macOS `.app` + DMG）；GitHub Actions 三平台并行构建发版 |
+
+### 工作流程
+
+```
+┌────────────┐   问题 + 真实表结构    ┌──────────────┐
+│  Text2SQL  │ ─────────────────────▶ │  AI 适配层    │
+│   页面     │                        │ OpenAI /     │
+│            │ ◀───────────────────── │ Anthropic /  │
+└─────┬──────┘       生成 SQL          │ Ollama       │
+      │                                └──────────────┘
+      │ SQL 预检（括号 / 引号 / 语句完整性）
+      ▼
+┌────────────┐   SQLAlchemy 执行   ┌──────────────┐
+│ SQL 编辑区  │ ──────────────────▶ │  数据库       │
+│（可人工修改）│ ◀────────────────── │ 14 类内置驱动 │
+└────────────┘   表格 + 分页结果     └──────────────┘
+```
+
+### 目录结构
+
+```
+muask/
+├── main.py                        # 应用入口
+├── requirements.txt               # 依赖清单
+├── config.example.json            # 示例配置
+├── muask.spec                     # PyInstaller 配置（macOS 出 .app，Win/Linux 出单文件）
+├── README.md / README.en.md       # 中文 / 英文说明
+├── LICENSE                        # MIT 协议
+├── .github/workflows/release.yml  # 三平台 CI 构建与发版
+├── scripts/
+│   ├── build_macos.sh             # macOS 构建 + ad-hoc 签名 + 打 DMG
+│   ├── prepare_icon.py            # 从带背景的素材抠出透明底圆角母版
+│   └── make_icons.py              # 由母图生成 .icns / .ico
+├── assets/                        # 图标、二维码、界面截图
+└── app/
+    ├── __init__.py                # 版本号（单一来源）
+    ├── paths.py                   # 资源 / 配置路径解析（源码 vs 打包）
+    ├── config.py                  # config.json 读写 + DB/AI 配置管理
+    ├── db.py                      # SQLAlchemy URL 构造 + 各方言分页 + 执行 + 预检
+    ├── db_dialects.py             # 达梦 / 人大金仓 SQLAlchemy 方言适配
+    ├── ai_providers.py            # AI 适配层（OpenAI + Anthropic 双协议）
+    ├── workers.py                 # 后台 QThread（AI 生成、连接测试、SQL 执行）
+    ├── highlighter.py             # SQL 语法高亮
+    ├── styles.py                  # QSS 样式
+    ├── toast.py                   # Toast 通知
+    ├── error_dialog.py            # 错误弹窗
+    ├── title_bar.py               # 自定义标题栏（版本检查 / 捐赠 / 窗口控制）
+    ├── update_dialog.py           # 新版本提示弹窗
+    ├── updater.py                 # GitHub / Gitee 版本检查
+    ├── donate_dialog.py           # 打赏二维码弹窗
+    ├── pages_text2sql.py          # Text2SQL 页面
+    ├── pages_data_source.py       # 数据源配置页面
+    ├── pages_ai.py                # AI 配置页面
+    ├── pages_about.py             # 软件说明页面
+    ├── pages_about_us.py          # 关于我们页面
+    └── main_window.py             # 主窗口
+```
+
+---
+
+<a id="build" name="build"></a>
+
+## 🛠️ 开发与打包
+
+打包配置集中在 `muask.spec`（不要用裸 `pyinstaller -F main.py`，会丢掉 assets 和 macOS 的 bundle 结构）。
 
 **Windows / Linux** —— 单文件可执行：
 
@@ -369,26 +426,83 @@ macOS 必须打成 `.app` 而不是裸可执行文件：Gatekeeper **不给**未
 若你有 Apple Developer 会员，把 `scripts/build_macos.sh` 里两处 `TODO(notarize)` 按注释改成真实 Developer ID 并加上 `notarytool` / `stapler` 两步，用户即可**零提示**直接双击运行。
 
 **换图标**：
+
 - 素材本身是**透明底方形图标**：跑 `python3 scripts/make_icons.py 你的图.png`，脚本会归一化生成 1024x1024 母版 `assets/app_icon.png`（Qt 窗口图标），再重新生成 `.icns` / `.ico`。
-- 素材是**带照片背景的 JPG**（如现在的 `assets/icon.jpg`，图标外面有白边和投影）：先跑 `python3 scripts/prepare_icon.py assets/icon.jpg` 抠出圆角方块本体、生成透明底母版，再跑 `python3 scripts/make_icons.py`。注意抠图脚本的几何参数是按当前素材量好的，换了构图不同的素材需要重新调整。
+- 素材是**带照片背景的 JPG**（如现在的 `assets/icon.jpg`）：先跑 `python3 scripts/prepare_icon.py assets/icon.jpg` 抠出圆角方块本体、生成透明底母版，再跑 `python3 scripts/make_icons.py`。
 
 两个脚本都依赖 macOS 自带的 `sips` / `iconutil`（prepare 还用到项目已装的 PySide6），无需额外图像库。
 
 ---
 
-## 已知局限
+<a id="roadmap" name="roadmap"></a>
 
-- **达梦 / 人大金仓的官方 Python 驱动只有 Windows / Linux wheel，没有 macOS 版**（厂商发布限制，非本项目可控）：Windows / Linux 打包版内置官方原生驱动，开箱直连；macOS 版连金仓会自动改用 PostgreSQL 协议（psycopg2，多数 KingbaseES 实例可连），连达梦请使用 Windows / Linux 打包版，或在 Windows / Linux 上从源码运行。
-- **神通（ShenTong）/ 崖山 YashanDB / H2 不在内置类型中**：神通官方只提供 JDBC / ODBC 驱动；崖山 Python 驱动不通过 PyPI 分发；H2 是纯 Java 引擎，JDBC 桥接还要求用户机器装有 JVM 和厂商 jar——都与「开箱直连」目标冲突。请用「其他（自定义）」数据源自行接入。
-- GBase 8a 通过 MySQL 协议接入（默认端口 5258）；其他 GBase 系列（如 GBase 8s/8t）协议不同，请用「其他（自定义）」。OceanBase 的 Oracle 租户同样请用「其他（自定义）」（可用 `oracledb` 接）。
-- MariaDB 官方 Python connector（`mariadb` 包）只有 Windows wheel、Linux/macOS 无法打包；但 MariaDB 兼容 MySQL 协议，本工具统一用 `PyMySQL` 直连，因此三平台都能内置直连，不影响使用。
-- 分页对复杂 SQL（含 `ORDER BY / GROUP BY / WITH`）以子查询方式包裹，绝大多数场景可用；极少数极端 SQL 可能需要用户手动加分页。
-- 安全性：为便于开发调试，允许所有 SQL 操作。生产环境务必单独做权限控制。
-- 多语句一次执行不支持（SQLAlchemy `text()` 底层驱动通常一次只发一条），需要一条一条执行。
-- macOS 版首次运行需手动放行一次（见上文）。
+## 🗺️ 版本与维护
+
+- **当前版本**：v1.4.1（2026-10-07）—— 修复 Ollama 本地模型免 Key 使用、SQL Server 分页、连接串转义与 SQL 预检误判，并精简安装包体积。
+- **更新日志**：每次发版均在 [GitHub Releases](https://github.com/vfaner/muask/releases) / [Gitee Releases](https://gitee.com/super_rgh/muask/releases) 附完整说明；[官网更新日志](https://muask.qqmu.com/changelog.html) 同步维护。
+- **维护状态**：项目活跃维护中，问题反馈与 Pull Request 会持续处理。
+- **迭代方向**（按实际需求调整，非承诺）：更多数据库与国产数据库适配、表结构筛选与提示词优化、查询结果导出、更完善的错误诊断与使用文档。
+
+后续版本会继续通过 GitHub Actions 三平台自动构建，并在应用内提供版本检查与更新提示。
 
 ---
 
-## 许可证
+<a id="faq" name="faq"></a>
 
-本项目基于 **MIT License** 开源，版权所有 © 2025 vfaner。详见 [LICENSE](./LICENSE) 文件。
+## ❓ 常见问题与已知局限
+
+### 常见问题
+
+- **一定要买 API Key 吗？** 不一定。AI 配置可选 `Ollama（本地）`，本机运行开源模型，免费、免 Key；云端厂商也有不同价位，按需选择。
+- **我的表结构和查询数据会被上传吗？** 生成 SQL 时，表结构与你的问题会发送给所选 AI 厂商；数据库连接信息与查询结果始终留在本机。敏感场景请选本地 Ollama，全程无需外网。
+- **AI 生成的 SQL 安全吗？** SQL 执行前完整展示、可手动修改；数据库报错原样显示。建议使用只读账号，从权限层兜底。
+- **需要安装 Python 或数据库驱动吗？** 安装包已内置运行环境与全部驱动，不需要。只有「其他（自定义）」类型需要自备驱动。
+- **Windows / macOS 首次运行被拦截？** 见上文「快速开始」中的放行步骤，各只需放行一次。
+
+### 已知局限
+
+- **达梦 / 人大金仓的官方 Python 驱动只有 Windows / Linux wheel，没有 macOS 版**（厂商发布限制）：Windows / Linux 打包版内置官方原生驱动；macOS 版连金仓自动改用 PostgreSQL 协议，连达梦请使用 Windows / Linux 版，或从源码运行。
+- **神通（ShenTong）/ 崖山 YashanDB / H2 不在内置类型中**：官方仅有 JDBC / ODBC 驱动或纯 Java 引擎，请用「其他（自定义）」接入。
+- GBase 8a 通过 MySQL 协议接入（默认端口 5258）；其他 GBase 系列（如 8s / 8t）协议不同，请用「其他（自定义）」。OceanBase 的 Oracle 租户同理。
+- MariaDB 官方 Python connector 只有 Windows wheel，本项目统一用 PyMySQL 直连，三平台均可内置。
+- 分页对复杂 SQL（含 `ORDER BY / GROUP BY / WITH`）以子查询方式包裹，绝大多数场景可用；极少数极端 SQL 可能需要手动加分页。
+- 安全性：为便于开发调试，允许所有 SQL 操作。生产环境务必单独做权限控制。
+- 多语句一次执行不支持（底层驱动通常一次只发一条），需要逐条执行。
+
+---
+
+<a id="contributing" name="contributing"></a>
+
+## 🤝 贡献与反馈
+
+我们欢迎任何形式的参与：
+
+- 🐛 **问题反馈**：在 [Issues](https://gitee.com/super_rgh/muask/issues) 提交时，请附上操作系统、软件版本、数据库类型与完整报错，便于快速定位。
+- 💡 **功能建议**：欢迎在 Issues 中描述使用场景与期望效果。
+- 🔧 **代码贡献**：Fork → 新建分支 → 提交改动 → 发起 Pull Request。提交前请确保 `python main.py` 可正常启动，并说明改动目的。
+- 📖 **文档改进**：README、使用说明的修正同样欢迎。
+
+**联系方式**
+
+| 方式 | 号码 |
+|---|---|
+| 邮箱 | [vfaner@88.com](mailto:vfaner@88.com) |
+| QQ | [817094](https://wpa.qq.com/msgrd?v=3&uin=817094&site=qq&menu=yes) / [2912167928](https://wpa.qq.com/msgrd?v=3&uin=2912167928&site=qq&menu=yes) |
+| QQ 群 | [426669837（点击加群）](https://qun.qq.com/universal-share/share?ac=1&authKey=RI%2FAwTODgEDm0uGAqGTqlwV7%2FPjE7njMa3DIb8c3X7H8keqdZ4hkJpDDpDjYkw5p&busi_data=eyJncm91cENvZGUiOiI0MjY2Njk4MzciLCJ0b2tlbiI6Imh1MWtOZHRYZ3E2WnpyK3dLK1N1WWp6cFprRjNrQlZqSXZ1U0pMdXRtcjZZcjhFTndJcXV4NUNnQXhUV0tjMFEiLCJ1aW4iOiI4MTcwOTQifQ%3D%3D&data=V88jHxiTMtasEWtL2EfVUg97X6IQwgKM6LRY46VLu2mEuaWkzBX0dSiV0iEgzGkFVaSmUCTMig_Sw8wCwznxhQ&svctype=4&tempid=h5_group_info) |
+| 微信 | qqmu66（复制即可添加） |
+| 官网 | https://muask.qqmu.com |
+
+**项目地址**
+
+| 平台 | 地址 |
+|---|---|
+| Gitee（主仓库 / 国内） | https://gitee.com/super_rgh/muask |
+| GitHub | https://github.com/vfaner/muask |
+
+如果这个项目对你有帮助，欢迎点一个 **Star ⭐** —— 这是对我们持续维护最大的鼓励。
+
+---
+
+## 📄 开源协议
+
+本项目基于 [**MIT License**](./LICENSE) 开源，版权所有 © 2025 vfaner。个人与商业场景均可自由使用、修改与分发，请保留版权声明。

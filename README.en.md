@@ -51,7 +51,7 @@ Taking over a mature project often means facing hundreds or thousands of tables 
 | Item | Details |
 |---|---|
 | What it is | A desktop Text2SQL client for developers, QA, ops and data analysts |
-| Latest version | **v1.4.1** (2026-10-07) |
+| Latest version | **v1.5.0** (2026-11-18) |
 | Platforms | Windows x64 / macOS (Apple Silicon) / Linux x86_64 — **no Python installation required** |
 | Databases | 14 built-in types with bundled drivers, including Dameng, KingbaseES, HighGo, Vastbase, OceanBase, TiDB and GBase 8a |
 | AI providers | OpenAI-compatible `/chat/completions` and Anthropic-compatible `/messages`, plus local Ollama |
@@ -441,7 +441,7 @@ Both scripts shell out to macOS's built-in `sips` / `iconutil` (prepare also use
 
 ## 🗺️ Releases & maintenance
 
-- **Current version**: v1.4.1 (2026-10-07) — fixes Ollama local models working without an API key, SQL Server pagination, connection-string escaping and SQL pre-check false positives; slims the installers.
+- **Current version**: v1.5.0 (2026-11-18) — adds SQL Server named instances plus performance work (pooled engine reuse, bulk reflection), and fixes stale results after switching data sources, hangs on exit and more; the About Us page now features MuOpt, MuRig and the kefu assistant.
 - **Changelog**: every release ships full notes on [GitHub Releases](https://github.com/vfaner/muask/releases) / [Gitee Releases](https://gitee.com/super_rgh/muask/releases); the [website changelog](https://muask.qqmu.com/changelog.html) mirrors them.
 - **Status**: actively maintained; issues and pull requests are handled continuously.
 - **Roadmap** (subject to change, not a commitment): more database and domestic-database adapters, schema ranking / prompt improvements, query result export, richer diagnostics and documentation.

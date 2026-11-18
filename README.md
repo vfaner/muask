@@ -51,7 +51,7 @@
 | 项目信息 | 说明 |
 |---|---|
 | 项目定位 | 面向开发、测试、运维、数据分析的桌面 Text2SQL 客户端 |
-| 最新版本 | **v1.4.1**（2026-10-07） |
+| 最新版本 | **v1.5.0**（2026-11-18） |
 | 运行环境 | Windows x64 / macOS (Apple Silicon) / Linux x86_64，安装包**无需 Python** |
 | 数据库支持 | 14 类数据库内置驱动，含达梦、人大金仓、瀚高、海量、OceanBase、TiDB、GBase 8a 等信创库 |
 | AI 支持 | OpenAI 兼容 `/chat/completions` 与 Anthropic 兼容 `/messages` 双协议，支持 Ollama 本地模型 |
@@ -441,7 +441,7 @@ macOS 必须打成 `.app` 而不是裸可执行文件：Gatekeeper **不给**未
 
 ## 🗺️ 版本与维护
 
-- **当前版本**：v1.4.1（2026-10-07）—— 修复 Ollama 本地模型免 Key 使用、SQL Server 分页、连接串转义与 SQL 预检误判，并精简安装包体积。
+- **当前版本**：v1.5.0（2026-11-18）—— 新增 SQL Server 命名实例支持与连接复用/批量反射等性能优化，修复切换数据源后旧结果串台、退出卡死等问题，「关于我们」新增沐优 MuOpt、MuRig、智能客服推荐。
 - **更新日志**：每次发版均在 [GitHub Releases](https://github.com/vfaner/muask/releases) / [Gitee Releases](https://gitee.com/super_rgh/muask/releases) 附完整说明；[官网更新日志](https://muask.qqmu.com/changelog.html) 同步维护。
 - **维护状态**：项目活跃维护中，问题反馈与 Pull Request 会持续处理。
 - **迭代方向**（按实际需求调整，非承诺）：更多数据库与国产数据库适配、表结构筛选与提示词优化、查询结果导出、更完善的错误诊断与使用文档。

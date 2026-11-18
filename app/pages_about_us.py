@@ -1,13 +1,12 @@
 """「关于我们」页面：开源团队介绍、联系方式、其他工具推荐。"""
 from __future__ import annotations
 
-import webbrowser
-
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
+
+from .ui_common import Card, open_url
 
 
 # —— 其他工具推荐（按钮点击直接在浏览器打开） ——
@@ -24,29 +23,26 @@ FRIEND_TOOLS = [
         "url": "https://jargus.qqmu.com",
         "emoji": "🔍",
     },
+    {
+        "name": "沐优 MuOpt",
+        "desc": "SQL 优化与信创转换",
+        "url": "https://muopt.qqmu.com",
+        "emoji": "⚡",
+    },
+    {
+        "name": "MuRig",
+        "desc": "开发环境一键装配",
+        "url": "https://github.com/vfaner/murig",
+        "emoji": "🔧",
+        "link_text": "GitHub ↗",
+    },
+    {
+        "name": "智能客服 kefu",
+        "desc": "多模型 RAG 智能客服",
+        "url": "https://kefu.qqmu.com",
+        "emoji": "💬",
+    },
 ]
-
-
-def _open_url(url: str) -> None:
-    if not QDesktopServices.openUrl(QUrl(url)):
-        try:
-            webbrowser.open(url, new=2)
-        except Exception:
-            pass
-
-
-class _Card(QFrame):
-    """一张带浅边框、白底、圆角的卡片。"""
-
-    def __init__(self, parent: QWidget | None = None):
-        super().__init__(parent)
-        self.setStyleSheet(
-            "_Card {"
-            "  background:#ffffff;"
-            "  border:1px solid #e6ebf2;"
-            "  border-radius:10px;"
-            "}"
-        )
 
 
 class AboutUsPage(QWidget):
@@ -77,7 +73,7 @@ class AboutUsPage(QWidget):
         content.addWidget(title)
 
         # —— 团队介绍卡片 ——
-        intro = _Card()
+        intro = Card()
         intro_l = QVBoxLayout(intro)
         intro_l.setContentsMargins(20, 16, 20, 16)
         intro_l.setSpacing(8)
@@ -117,7 +113,7 @@ class AboutUsPage(QWidget):
         content.addWidget(intro)
 
         # —— 其他工具推荐卡片 ——
-        rec_card = _Card()
+        rec_card = Card()
         rec_l = QVBoxLayout(rec_card)
         rec_l.setContentsMargins(20, 16, 20, 16)
         rec_l.setSpacing(12)
@@ -139,10 +135,10 @@ class AboutUsPage(QWidget):
             label.setStyleSheet("color:#2c3e50; font-size:13px;")
             row.addWidget(label, 1)
 
-            btn = QPushButton("前往官网 ↗")
+            btn = QPushButton(tool.get("link_text", "前往官网 ↗"))
             btn.setProperty("flat", True)
             btn.setCursor(Qt.PointingHandCursor)
-            btn.clicked.connect(lambda _=False, url=tool["url"]: _open_url(url))
+            btn.clicked.connect(lambda _=False, url=tool["url"]: open_url(url))
             row.addWidget(btn)
 
             rec_l.addLayout(row)

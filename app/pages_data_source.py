@@ -84,6 +84,9 @@ class DataSourcePage(QWidget):
         self.type_combo.currentIndexChanged.connect(self._on_type_change)
 
         self.host_edit = QLineEdit("127.0.0.1")
+        # SQL Server 命名实例专用（其他类型不显示）
+        self.instance_edit = QLineEdit()
+        self.instance_edit.setPlaceholderText("可选，如 SQLEXPRESS、PC（命名实例）")
         # 端口用纯文本框 + 数字校验，取代 QSpinBox 的上下箭头
         self.port_edit = QLineEdit("3306")
         self.port_edit.setValidator(QIntValidator(0, 65535, self))
@@ -112,13 +115,15 @@ class DataSourcePage(QWidget):
         lib_l.addWidget(self.lib_edit, 1)
         lib_l.addWidget(btn_browse)
 
-        for w in (self.name_edit, self.type_combo, self.host_edit, self.port_edit,
-                  self.db_edit, self.user_edit, self.pwd_edit):
+        for w in (self.name_edit, self.type_combo, self.host_edit, self.instance_edit,
+                  self.port_edit, self.db_edit, self.user_edit, self.pwd_edit):
             w.setMinimumWidth(380)
 
         form.addRow("数据源名称", self.name_edit)
         form.addRow("数据库类型", self.type_combo)
         form.addRow("主机地址", self.host_edit)
+        self.instance_label = QLabel("实例名")
+        form.addRow(self.instance_label, self.instance_edit)
         form.addRow("端口", self.port_edit)
         form.addRow("数据库名", self.db_edit)
         form.addRow("用户名", self.user_edit)
@@ -128,6 +133,12 @@ class DataSourcePage(QWidget):
         form.addRow(self.lib_label, self.lib_row)
         self.lib_row.setVisible(False)
         self.lib_label.setVisible(False)
+
+        # 实例名仅 SQL Server 使用，默认隐藏
+        self.instance_edit.setVisible(False)
+        self.instance_label.setVisible(False)
+        self.instance_edit.textChanged.connect(self._sync_mssql_ui)
+        self.host_edit.textChanged.connect(self._sync_mssql_ui)
 
         right_l.addWidget(form_group)
 
@@ -172,6 +183,7 @@ class DataSourcePage(QWidget):
         self.name_edit.setText("")
         self.type_combo.setCurrentIndex(0)
         self.host_edit.setText("127.0.0.1")
+        self.instance_edit.setText("")
         self.port_edit.setText("3306")
         self.db_edit.setText("")
         self.user_edit.setText("")
@@ -189,7 +201,14 @@ class DataSourcePage(QWidget):
                 break
         self.type_combo.setCurrentIndex(idx)
         self.host_edit.setText(ds.get("host", ""))
-        self.port_edit.setText(str(int(ds.get("port") or 0)))
+        self.instance_edit.setText(ds.get("instance", "") or "")
+        has_instance = (ds.get("type") == "mssql"
+                        and (ds.get("instance") or "\\" in (ds.get("host") or "")))
+        try:
+            port_text = str(int(ds.get("port") or 0))
+        except (TypeError, ValueError):
+            port_text = "0"  # hand-edited non-numeric port: show a sane value
+        self.port_edit.setText("" if has_instance else port_text)
         self.db_edit.setText(ds.get("database", ""))
         self.user_edit.setText(ds.get("username", ""))
         self.pwd_edit.setText(ds.get("password", ""))
@@ -203,6 +222,14 @@ class DataSourcePage(QWidget):
             toast.warning(self, "数据源名称不能为空")
             return None
 
+        dtype = self.type_combo.currentData()
+        host = self.host_edit.text().strip()
+        instance = self.instance_edit.text().strip().strip("\\") if dtype == "mssql" else ""
+        if dtype == "mssql" and "\\" in host:
+            # Also accept the legacy "host\instance" form typed into 主机地址.
+            host, host_instance = host.split("\\", 1)
+            instance = instance or host_instance.strip().strip("\\")
+
         port_txt = self.port_edit.text().strip()
         if not port_txt:
             port = 0
@@ -214,6 +241,10 @@ class DataSourcePage(QWidget):
             except ValueError:
                 toast.warning(self, "端口必须是 0–65535 的数字")
                 return None
+        if dtype == "mssql" and instance:
+            # pymssql ignores the port when an instance is given; SQL Browser
+            # resolves the dynamic port. Storing 0 keeps config.json honest.
+            port = 0
 
         params_txt = self.params_edit.toPlainText().strip()
         params: Dict[str, Any] = {}
@@ -226,7 +257,6 @@ class DataSourcePage(QWidget):
                 toast.warning(self, f"连接参数不是有效 JSON: {e}")
                 return None
 
-        dtype = self.type_combo.currentData()
         lib_dir = self.lib_edit.text().strip()
         if dtype == "custom":
             if not lib_dir:
@@ -236,10 +266,10 @@ class DataSourcePage(QWidget):
                 toast.warning(self, "自定义数据库还必须在「连接参数」中填写 SQLAlchemy 连接字符串 url")
                 return None
 
-        return {
+        ds = {
             "name": name,
             "type": dtype,
-            "host": self.host_edit.text().strip(),
+            "host": host,
             "port": port,
             "database": self.db_edit.text().strip(),
             "username": self.user_edit.text().strip(),
@@ -247,6 +277,9 @@ class DataSourcePage(QWidget):
             "lib_dir": lib_dir,
             "params": params,
         }
+        if dtype == "mssql":
+            ds["instance"] = instance
+        return ds
 
     # ----- Events -----
     def _on_select(self, current: QListWidgetItem, _prev: QListWidgetItem) -> None:
@@ -264,6 +297,9 @@ class DataSourcePage(QWidget):
         is_custom = code == "custom"
         self.lib_row.setVisible(is_custom)
         self.lib_label.setVisible(is_custom)
+        if code != "mssql":
+            self.instance_edit.clear()
+        self._sync_mssql_ui()
         for _label, c, port in DB_TYPES:
             if c == code:
                 # Only change port if the current one is a known default of some other type
@@ -275,6 +311,21 @@ class DataSourcePage(QWidget):
                                     5866, 2881, 4000, 50000, 0]:
                     self.port_edit.setText(str(port))
                 break
+
+    def _sync_mssql_ui(self, *_args) -> None:
+        """Show the instance field only for SQL Server; disable the port when
+        an instance name is present (pymssql ignores the port in that case)."""
+        is_mssql = self.type_combo.currentData() == "mssql"
+        self.instance_edit.setVisible(is_mssql)
+        self.instance_label.setVisible(is_mssql)
+        if not is_mssql:
+            self.port_edit.setEnabled(True)
+            self.port_edit.setPlaceholderText("")
+            return
+        use_instance = bool(self.instance_edit.text().strip()
+                            or "\\" in self.host_edit.text())
+        self.port_edit.setEnabled(not use_instance)
+        self.port_edit.setPlaceholderText("自动（命名实例解析）" if use_instance else "")
 
     def _on_browse_lib(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "选择自定义驱动的依赖目录")
@@ -307,6 +358,14 @@ class DataSourcePage(QWidget):
         ds = self._read_form()
         if not ds:
             return
+        # Saving under an existing name (new entry, or a rename onto another
+        # source's name) would silently replace that config's host/credentials.
+        if ds["name"] != self._current_name and self.cfg.find_data_source(ds["name"]):
+            if QMessageBox.question(
+                self, "确认覆盖",
+                f"已存在名为 “{ds['name']}” 的数据源，继续保存将覆盖它。是否继续？",
+            ) != QMessageBox.Yes:
+                return
         # If renaming, delete old first
         if self._current_name and self._current_name != ds["name"]:
             self.cfg.remove_data_source(self._current_name)

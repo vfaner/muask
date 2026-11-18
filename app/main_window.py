@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 )
 
 from .config import ConfigManager
+from .db import dispose_engines
 from .pages_ai import AIConfigPage
 from .pages_about import AboutPage
 from .pages_about_us import AboutUsPage
@@ -149,18 +150,34 @@ class MainWindow(QMainWindow):
         self.status_msg_label.setText(msg)
         self._refresh_status()
 
+    @staticmethod
+    def _stop_thread(worker) -> None:
+        """Give a background worker a moment to finish, then cut it loose.
+
+        Qt aborts the process if a QThread object is destroyed while still
+        running, which is exactly what happens when the user closes the window
+        mid-connection. Waiting is preferred; terminate() is the escape hatch
+        for a thread stuck in a driver call at shutdown.
+        """
+        if worker is None or not worker.isRunning():
+            return
+        if not worker.wait(2000):
+            worker.terminate()
+            worker.wait(1000)
+
     def closeEvent(self, event) -> None:
         # Let the background version probe finish (or time out) before tearing
         # down, otherwise Qt prints "QThread: Destroyed while thread is still
         # running" on every quit.
-        updater = getattr(self.title_bar, "_updater", None)
-        if updater is not None and updater.isRunning():
-            updater.wait(2000)
-        # In-flight AI / SQL / schema threads too — don't let Qt destroy a
-        # QThread that is still running ("QThread: Destroyed while running").
+        self._stop_thread(getattr(self.title_bar, "_updater", None))
+        # In-flight AI / SQL / schema threads too.
         page = self.text2sql_page
-        pending = [page._ai_worker, page._sql_worker, *page._schema_workers]
+        pending = [
+            page._ai_worker, page._sql_worker, *page._schema_workers,
+            self.data_source_page._test_worker, self.ai_page._test_worker,
+        ]
         for worker in pending:
-            if worker is not None and worker.isRunning():
-                worker.wait(2000)
+            self._stop_thread(worker)
+        # Close pooled DB connections held by the engine cache.
+        dispose_engines()
         super().closeEvent(event)

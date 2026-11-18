@@ -65,13 +65,29 @@ def build_system_prompt(dialect: str, schema: str = "") -> str:
 
 
 def _extract_sql(text: str) -> str:
-    """Remove markdown fences / stray commentary if any."""
+    """Remove markdown fences / stray commentary if any.
+
+    The language tag is arbitrary (``sql``, ``mysql``, ``tsql`` …): taking only
+    the ``sql`` tag would leave ``mysql\\nSELECT …`` in the editor.
+    """
     if not text:
         return ""
-    m = re.search(r"```(?:sql)?\s*(.+?)```", text, flags=re.DOTALL | re.IGNORECASE)
+    # Normal fenced block: everything after the opening line (info string).
+    fence = re.search(r"```[^\n]*\n(.*?)```", text, flags=re.DOTALL)
+    if fence:
+        return fence.group(1).strip()
+    # Single-line fence with a known language tag: ```sql SELECT ...
+    m = re.search(
+        r"```(?:sql|mysql|mariadb|postgres(?:ql)?|tsql|sqlserver|sqlite|"
+        r"oracle|plsql|db2|hive|spark)\b[ \t]*(.+?)```",
+        text,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
     if m:
         return m.group(1).strip()
-    return text.strip()
+    # Single-line fence with no tag/unknown tag: ```SELECT ...
+    m = re.search(r"```\s*(.+?)```", text, flags=re.DOTALL)
+    return m.group(1).strip() if m else text.strip()
 
 
 # ---------- Base ----------
@@ -99,7 +115,13 @@ class OpenAIStyleProvider(BaseProvider):
         self.api_base = (api_base or "").rstrip("/")
         self.api_key = api_key or ""
         self.model = model or ""
-        self.temperature = float(temperature or 0.2)
+        # A hand-edited config may hold anything here; never let provider
+        # construction raise before the request is even attempted.
+        try:
+            t = float(temperature if temperature is not None else 0.2)
+        except (TypeError, ValueError):
+            t = 0.2
+        self.temperature = min(2.0, max(0.0, t))
         self.timeout = timeout
 
     def _endpoint(self) -> str:
@@ -178,7 +200,13 @@ class AnthropicStyleProvider(BaseProvider):
         self.api_base = (api_base or "").rstrip("/")
         self.api_key = api_key or ""
         self.model = model or ""
-        self.temperature = float(temperature or 0.2)
+        # Anthropic rejects temperature > 1.0 (the UI allows up to 2.0 for
+        # OpenAI-compatible vendors), so clamp instead of failing every call.
+        try:
+            t = float(temperature if temperature is not None else 0.2)
+        except (TypeError, ValueError):
+            t = 0.2
+        self.temperature = min(1.0, max(0.0, t))
         self.timeout = timeout
         self.version = anthropic_version
         self.max_tokens = int(max_tokens)

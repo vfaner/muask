@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Optional, Tuple
+from typing import Tuple
 from urllib import request
 
 from PySide6.QtCore import QThread, Signal
@@ -66,13 +66,16 @@ class UpdateCheckWorker(QThread):
         for api_url, page_url in sources:
             try:
                 data = _http_get_json(api_url)
-            except Exception as e:  # network / DNS / 404 / timeout — try next source
+                if not isinstance(data, dict):
+                    # Captive portal / proxy returned HTTP 200 with non-JSON
+                    # shape; try the next source instead of dying silently.
+                    raise ValueError("unexpected JSON payload")
+                tag = (data.get("tag_name") or "").strip()
+                notes = (data.get("body") or "").strip()
+                if not tag:
+                    raise ValueError("release has no tag_name")
+            except Exception as e:  # network / DNS / 404 / timeout — next source
                 last_err = f"{type(e).__name__}: {e}"
-                continue
-
-            tag = (data.get("tag_name") or "").strip()
-            notes = (data.get("body") or "").strip()
-            if not tag:
                 continue
 
             latest = parse_semver(tag)

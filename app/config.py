@@ -86,6 +86,12 @@ DUAL_PROTOCOL_PRESETS: Dict[str, Dict[str, tuple]] = {
 # to the new code, and this alias keeps them readable even before migration.
 _PROVIDER_ALIASES = {"volcengine_anthropic": "volcengine"}
 
+# Vendors whose endpoint normally runs without authentication: Ollama locally,
+# and custom OpenAI/Anthropic-compatible gateways (LM Studio, vLLM, LiteLLM …).
+# An empty API key is allowed for these; a remote gateway will simply reject it
+# with a 401 instead of being blocked by client-side validation.
+KEYLESS_PROVIDERS = {"ollama", "openai_custom", "anthropic_custom"}
+
 
 def provider_preset(code: str, protocol: str = "") -> tuple:
     """Resolve a vendor code to ``(label, protocol, base_url, default_model)``.
@@ -110,7 +116,7 @@ def _obfuscate(text: str) -> str:
     if not text:
         return ""
     try:
-        return "b64:" + base64.b64encode(text.encode("utf-8")).decode("ascii")
+        return "b64:" + base64.b64encode(str(text).encode("utf-8")).decode("ascii")
     except Exception:
         return ""
 
@@ -118,6 +124,8 @@ def _obfuscate(text: str) -> str:
 def _deobfuscate(text: str) -> str:
     if not text:
         return ""
+    # A hand-edited config may hold a number/bool where a secret used to be.
+    text = text if isinstance(text, str) else str(text)
     if text.startswith("b64:"):
         try:
             return base64.b64decode(text[4:].encode("ascii")).decode("utf-8")
@@ -129,6 +137,10 @@ def _deobfuscate(text: str) -> str:
 
 def _normalize_ai_entry(ai: Dict[str, Any]) -> None:
     """In-place migration for renamed vendors and corrected endpoint URLs."""
+    # Text fields feed directly into QLineEdit.setText() and URL assembly.
+    for field in ("name", "provider", "protocol", "api_base", "api_key", "model"):
+        if field in ai and not isinstance(ai[field], str):
+            ai[field] = str(ai[field])
     # The Anthropic ARK entry used to be a separate vendor code; it is now one
     # dual-protocol vendor, so fold it back and mark the protocol explicitly.
     if ai.get("provider") == "volcengine_anthropic":
@@ -195,8 +207,18 @@ class ConfigManager:
                 continue
             try:
                 with open(path, "r", encoding="utf-8") as f:
-                    return json.load(f), is_legacy
+                    raw = json.load(f)
+                if not isinstance(raw, dict):
+                    raise ValueError("configuration root must be a JSON object")
+                return raw, is_legacy
             except Exception:
+                # Preserve a corrupt primary config instead of silently
+                # replacing it with defaults on the next save.
+                if not is_legacy:
+                    try:
+                        os.replace(path, f"{path}.corrupt")
+                    except OSError:
+                        pass
                 continue
         return None, False
 
@@ -207,14 +229,28 @@ class ConfigManager:
 
         merged = json.loads(json.dumps(DEFAULT_CONFIG))
         merged.update(raw or {})
-        # Ensure nested dicts merged
+        # Ensure nested dicts merged (a hand-edited non-object must not crash
+        # startup — fall back to the defaults).
         base = DEFAULT_CONFIG["ui_settings"].copy()
-        base.update(merged.get("ui_settings", {}) or {})
+        extra = merged.get("ui_settings")
+        if isinstance(extra, dict):
+            base.update(extra)
         merged["ui_settings"] = base
 
+        # A hand-edited file can turn these lists into strings/objects or
+        # contain scalar entries; normalize before touching each entry so
+        # startup never dies on ds["password"] / ai["api_key"].
+        for key in ("data_sources", "ai_configs"):
+            items = merged.get(key)
+            merged[key] = [x for x in items if isinstance(x, dict)] if isinstance(items, list) else []
+        if not isinstance(merged.get("current_data_source"), str):
+            merged["current_data_source"] = ""
+        if not isinstance(merged.get("current_ai_config"), str):
+            merged["current_ai_config"] = ""
+
         # Migrate legacy single-config schema (ai_config: {...}) -> ai_configs: [...]
-        legacy = raw.get("ai_config") if isinstance(raw, dict) else None
-        if legacy and not merged.get("ai_configs"):
+        legacy = raw.get("ai_config")
+        if isinstance(legacy, dict) and legacy and not merged.get("ai_configs"):
             entry = _default_ai_entry("默认")
             entry.update({k: v for k, v in legacy.items() if k in entry})
             entry["api_key"] = legacy.get("api_key", "")
@@ -222,13 +258,20 @@ class ConfigManager:
             if not merged.get("current_ai_config"):
                 merged["current_ai_config"] = entry["name"]
 
-        # Ensure the list exists
-        merged.setdefault("ai_configs", [])
-
         # Decrypt sensitive fields
-        for ds in merged.get("data_sources", []):
+        for ds in merged["data_sources"]:
             ds["password"] = _deobfuscate(ds.get("password", ""))
-        for ai in merged.get("ai_configs", []):
+            # Text fields feed QLineEdit.setText() and URL assembly; numbers
+            # or objects from a hand-edited file would crash the UI thread.
+            for field in ("name", "type", "host", "database", "username",
+                          "instance", "lib_dir"):
+                if field in ds and not isinstance(ds[field], str):
+                    ds[field] = str(ds[field])
+            # build_engine_url() spreads this mapping into kwargs, so a
+            # hand-edited string/list would raise on every connection attempt.
+            if not isinstance(ds.get("params"), dict):
+                ds["params"] = {}
+        for ai in merged["ai_configs"]:
             ai["api_key"] = _deobfuscate(ai.get("api_key", ""))
             _normalize_ai_entry(ai)
 
@@ -244,23 +287,45 @@ class ConfigManager:
     def save(self) -> None:
         # Deep-copy and obfuscate secrets before writing
         out = json.loads(json.dumps(self.data))
-        for ds in out.get("data_sources", []):
+        # load() normalizes these, but save() may also be called right after
+        # programmatic data edits — keep it defensive all the same.
+        for key in ("data_sources", "ai_configs"):
+            items = out.get(key)
+            out[key] = [x for x in items if isinstance(x, dict)] if isinstance(items, list) else []
+        for ds in out["data_sources"]:
             ds["password"] = _obfuscate(ds.get("password", ""))
-        for ai in out.get("ai_configs", []):
+        for ai in out["ai_configs"]:
             ai["api_key"] = _obfuscate(ai.get("api_key", ""))
         # Don't persist the legacy key
         out.pop("ai_config", None)
 
+        tmp = f"{self.path}.tmp"
         try:
             os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-            with open(self.path, "w", encoding="utf-8") as f:
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(out, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            # Atomic on the same filesystem: a crash mid-save leaves the old
+            # config.json intact instead of a truncated file.
+            os.replace(tmp, self.path)
         except Exception as e:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
             raise RuntimeError(f"保存配置失败: {e}")
 
     # ----- Data source helpers -----
     def get_data_sources(self) -> List[Dict[str, Any]]:
-        return self.data.setdefault("data_sources", [])
+        items = self.data.get("data_sources")
+        if not isinstance(items, list):
+            items = []
+        # Drop junk entries from hand-edited files so every caller can rely on
+        # dict access (ds.get / ds["name"]) without crashing at startup.
+        items = [d for d in items if isinstance(d, dict)]
+        self.data["data_sources"] = items
+        return items
 
     def find_data_source(self, name: str) -> Optional[Dict[str, Any]]:
         for ds in self.get_data_sources():
@@ -282,7 +347,12 @@ class ConfigManager:
 
     # ----- AI configs (multi) -----
     def get_ai_configs(self) -> List[Dict[str, Any]]:
-        return self.data.setdefault("ai_configs", [])
+        items = self.data.get("ai_configs")
+        if not isinstance(items, list):
+            items = []
+        items = [a for a in items if isinstance(a, dict)]
+        self.data["ai_configs"] = items
+        return items
 
     def find_ai_config(self, name: str) -> Optional[Dict[str, Any]]:
         for ai in self.get_ai_configs():
@@ -324,7 +394,18 @@ class ConfigManager:
 
     # ----- UI settings -----
     def get_page_size(self) -> int:
-        return int(self.data.get("ui_settings", {}).get("page_size", 20) or 20)
+        ui = self.data.get("ui_settings")
+        try:
+            n = int(ui.get("page_size", 20) or 20) if isinstance(ui, dict) else 20
+        except (TypeError, ValueError):
+            n = 20
+        return max(5, min(1000, n))
 
     def set_page_size(self, n: int) -> None:
-        self.data.setdefault("ui_settings", {})["page_size"] = int(n)
+        try:
+            value = int(n)
+        except (TypeError, ValueError):
+            return  # ignore junk instead of crashing the settings page
+        if not isinstance(self.data.get("ui_settings"), dict):
+            self.data["ui_settings"] = {}
+        self.data["ui_settings"]["page_size"] = value

@@ -20,7 +20,7 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QToolButton, QWidget,
 )
@@ -49,7 +49,6 @@ def _make_glyph_icon(kind: str, size: int, color: str) -> QIcon:
 
     # White glyph on top
     p.setBrush(Qt.NoBrush)
-    from PySide6.QtGui import QPen
     pen = QPen(QColor("#ffffff"))
     pen.setWidthF(max(1.6, size * 0.14))
     pen.setCapStyle(Qt.RoundCap)
@@ -84,7 +83,6 @@ def _make_close_icon(size: int, color: str) -> QIcon:
     pix.fill(Qt.transparent)
     p = QPainter(pix)
     p.setRenderHint(QPainter.Antialiasing)
-    from PySide6.QtGui import QPen
     pen = QPen(QColor(color))
     pen.setWidthF(1.6)
     pen.setCapStyle(Qt.RoundCap)

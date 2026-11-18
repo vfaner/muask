@@ -252,6 +252,8 @@ Every type in the dropdown builds its connection URL automatically and connects 
 | DB2 | ibm_db + ibm-db-sa (IBM official; clidriver bundled) | DB2 protocol (50000) | ✅ bundled | ✅ bundled |
 | Custom | your own | put `{"url": "..."}` in connection params | install the driver yourself | install the driver yourself |
 
+> **SQL Server named instances**: fill in the “Instance name” field (e.g. `SQLEXPRESS`, `PC`) and leave the port empty — the app resolves the dynamic port through SQL Browser. Only default instances use 1433. For older servers such as SQL Server 2008 R2, add `{"tds_version": "7.3"}` to the connection params if negotiation fails.
+
 > **ShenTong (神通) / YashanDB (崖山) / H2** are not built-in types: ShenTong publishes only JDBC / ODBC drivers; YashanDB's Python driver is not distributed on PyPI; and H2 is a pure-Java engine that requires a JVM plus `h2.jar` on the user's machine (defeating the “connects out of the box” goal). Use the “custom” data source type and supply your own driver and URL. OceanBase **Oracle tenants** likewise need “custom” (MySQL tenants are built in).
 
 ### Sample connection URLs (for custom data sources)
@@ -262,7 +264,8 @@ Every type in the dropdown builds its connection URL automatically and connects 
 | PostgreSQL / OpenGauss / HighGo / Vastbase | `postgresql+psycopg2://user:pwd@host:5432/db` (HighGo default 5866) |
 | KingbaseES (PG fallback) | `postgresql+psycopg2://user:pwd@host:54321/db` |
 | Oracle | `oracle+oracledb://user:pwd@host:1521/?service_name=ORCL` (or SID: `…/XE`) |
-| SQL Server | `mssql+pymssql://user:pwd@host:1433/db` |
+| SQL Server (default instance) | `mssql+pymssql://user:pwd@host:1433/db` |
+| SQL Server (named instance) | `mssql+pymssql://user:pwd@host\instance/db` (no port; SQL Browser resolves it) |
 | DB2 | `ibm_db_sa://user:pwd@host:50000/db` |
 | Dameng | `dm+dmpython://user:pwd@host:5236/DAMENG` |
 | Custom | Put `{"url": "your+dialect://..."}` in the data source's connection params. |

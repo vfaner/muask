@@ -1,41 +1,17 @@
 """软件说明 / About page — 精简的功能介绍 + 上手步骤 + Star/捐赠 CTA。"""
 from __future__ import annotations
 
-import webbrowser
-
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from .donate_dialog import DonateDialog
 from .title_bar import GITHUB_REPO_URL
+from .ui_common import Card, open_url
 
 
 GITEE_REPO_URL = "https://gitee.com/super_rgh/muask"
-
-
-def _open_url(url: str) -> None:
-    if not QDesktopServices.openUrl(QUrl(url)):
-        try:
-            webbrowser.open(url, new=2)
-        except Exception:
-            pass
-
-
-class _Card(QFrame):
-    """白底圆角卡片，和「关于我们」页保持一致。"""
-
-    def __init__(self, parent: QWidget | None = None):
-        super().__init__(parent)
-        self.setStyleSheet(
-            "_Card {"
-            "  background:#ffffff;"
-            "  border:1px solid #e6ebf2;"
-            "  border-radius:10px;"
-            "}"
-        )
 
 
 class AboutPage(QWidget):
@@ -117,13 +93,13 @@ class AboutPage(QWidget):
 
         self.btn_star_gh = QPushButton("⭐  GitHub 加 Star")
         self.btn_star_gh.setCursor(Qt.PointingHandCursor)
-        self.btn_star_gh.clicked.connect(lambda: _open_url(GITHUB_REPO_URL))
+        self.btn_star_gh.clicked.connect(lambda: open_url(GITHUB_REPO_URL))
         btn_row.addWidget(self.btn_star_gh)
 
         self.btn_star_gitee = QPushButton("🌟  Gitee 加 Star")
         self.btn_star_gitee.setProperty("flat", True)
         self.btn_star_gitee.setCursor(Qt.PointingHandCursor)
-        self.btn_star_gitee.clicked.connect(lambda: _open_url(GITEE_REPO_URL))
+        self.btn_star_gitee.clicked.connect(lambda: open_url(GITEE_REPO_URL))
         btn_row.addWidget(self.btn_star_gitee)
 
         self.btn_donate = QPushButton("💝  赞助作者")
@@ -143,8 +119,8 @@ class AboutPage(QWidget):
 
     # ----- 构造工具 -----
     @staticmethod
-    def _card(title_text: str, bullets: list[str]) -> _Card:
-        card = _Card()
+    def _card(title_text: str, bullets: list[str]) -> Card:
+        card = Card()
         lay = QVBoxLayout(card)
         lay.setContentsMargins(20, 16, 20, 16)
         lay.setSpacing(8)

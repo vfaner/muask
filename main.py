@@ -35,7 +35,13 @@ def main():
 
     win = MainWindow()
     win.show()
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    # A driver call blocked in connect() can outlive the waits in closeEvent.
+    # Qt calls qFatal() if such a QThread is destroyed during interpreter
+    # shutdown, aborting the process on close. Everything persistent is
+    # fsynced before this point, so end the process directly instead of
+    # letting Python tear down live worker threads.
+    os._exit(exit_code if isinstance(exit_code, int) else 0)
 
 
 if __name__ == '__main__':

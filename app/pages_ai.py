@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 from .config import (
     AI_PROVIDERS,
     DUAL_PROTOCOL_PRESETS,
+    KEYLESS_PROVIDERS,
     ConfigManager,
     provider_preset,
 )
@@ -215,7 +216,13 @@ class AIConfigPage(QWidget):
         self.api_base_edit.setText(cfg.get("api_base", ""))
         self.api_key_edit.setText(cfg.get("api_key", ""))
         self.model_edit.setText(cfg.get("model", ""))
-        self.temp_edit.setText(str(cfg.get("temperature", 0.2) or 0.2))
+        # `or 0.2` would turn a deliberately saved temperature of 0.0 into
+        # 0.2 in the form; coerce explicitly instead.
+        try:
+            temperature = float(cfg.get("temperature", 0.2))
+        except (TypeError, ValueError):
+            temperature = 0.2
+        self.temp_edit.setText(str(temperature))
 
     def _read_form(self) -> Optional[Dict[str, Any]]:
         name = self.name_edit.text().strip()
@@ -225,10 +232,10 @@ class AIConfigPage(QWidget):
         api_base = self.api_base_edit.text().strip()
         api_key = self.api_key_edit.text().strip()
         model = self.model_edit.text().strip()
-        # Ollama 是本地推理，OpenAI 兼容端点不校验 key，允许留空
-        needs_key = self.provider_combo.currentData() != "ollama"
+        # 本地推理 / 自定义兼容网关通常不校验 key，允许留空
+        needs_key = self.provider_combo.currentData() not in KEYLESS_PROVIDERS
         if not api_base or not model or (needs_key and not api_key):
-            toast.warning(self, "API 地址 / API Key / 模型名称 不能为空（Ollama 本地服务可免填 Key）")
+            toast.warning(self, "API 地址 / API Key / 模型名称 不能为空（Ollama、自定义兼容接口可免填 Key）")
             return None
         try:
             temperature = float(self.temp_edit.text().strip() or "0.2")
@@ -314,6 +321,14 @@ class AIConfigPage(QWidget):
         cfg = self._read_form()
         if not cfg:
             return
+        # Saving under an existing name would silently replace its API key,
+        # endpoint and model; ask before doing that.
+        if cfg["name"] != self._current_name and self.cfg.find_ai_config(cfg["name"]):
+            if QMessageBox.question(
+                self, "确认覆盖",
+                f"已存在名为 “{cfg['name']}” 的 AI 配置，继续保存将覆盖它。是否继续？",
+            ) != QMessageBox.Yes:
+                return
         # If renaming, delete old first
         if self._current_name and self._current_name != cfg["name"]:
             self.cfg.remove_ai_config(self._current_name)

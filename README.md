@@ -254,6 +254,8 @@ python main.py
 | DB2 | ibm_db + ibm-db-sa（IBM 官方，wheel 自带 clidriver） | DB2 协议（50000） | ✅ 内置 | ✅ 内置 |
 | 其他（自定义） | 自备 | 「连接参数」中填 `{"url": "..."}` | 自行安装驱动 | 自行安装驱动 |
 
+> **SQL Server 命名实例**：在数据源页填写「实例名」（如 `SQLEXPRESS`、`PC`）并留空端口，程序会通过 SQL Browser 自动解析动态端口；默认实例才使用 1433。SQL Server 2008 R2 等老版本若连接协商失败，可在「连接参数」填 `{"tds_version": "7.3"}`。
+
 > **神通（ShenTong）/ 崖山 YashanDB / H2 未列入内置类型**：神通官方仅发布 JDBC / ODBC 驱动；崖山官方 Python 驱动不通过 PyPI 分发；H2 是纯 Java 引擎，必须本机装有 JVM 和 `h2.jar` 才能经 JDBC 桥接入——都与「开箱直连」目标冲突。需要连接时请选「其他（自定义）」，自行安装桥接驱动并提供 SQLAlchemy 连接串。OceanBase 的 **Oracle 租户**同理（MySQL 租户已内置）。
 
 ### 常见连接字符串（自定义数据源参考）
@@ -262,7 +264,8 @@ python main.py
 - PostgreSQL / OpenGauss / 瀚高 HighGo / 海量 Vastbase：`postgresql+psycopg2://user:pwd@host:5432/db`（HighGo 默认 5866）
 - 人大金仓（PG 协议兜底写法）：`postgresql+psycopg2://user:pwd@host:54321/db`
 - Oracle：`oracle+oracledb://user:pwd@host:1521/?service_name=ORCL`（或用 SID：`…/XE`）
-- SQL Server：`mssql+pymssql://user:pwd@host:1433/db`
+- SQL Server（默认实例）：`mssql+pymssql://user:pwd@host:1433/db`
+- SQL Server（命名实例）：`mssql+pymssql://user:pwd@host\instance/db`（不要写端口，由 SQL Browser 解析）
 - DB2：`ibm_db_sa://user:pwd@host:50000/db`
 - 达梦：`dm+dmpython://user:pwd@host:5236/DAMENG`
 - 自定义：在数据源的「连接参数」中填入 `{"url": "your+dialect://..."}`。

@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import math
 import re
+import threading
+from collections import OrderedDict
 from importlib.util import find_spec
-from typing import Any, Dict, List, Tuple
-from urllib.parse import quote, quote_plus
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
@@ -62,8 +64,11 @@ def build_engine_url(ds: Dict[str, Any]) -> str:
     host = ds.get("host") or "localhost"
     port = ds.get("port") or 0
     db = ds.get("database") or ""
-    user = quote_plus(ds.get("username") or "")
-    pwd = quote_plus(ds.get("password") or "")
+    # quote(), not quote_plus(): SQLAlchemy decodes credentials with
+    # unquote(), which leaves "+" as a literal plus — quote_plus would turn a
+    # space in the username/password into "+" and break authentication.
+    user = quote(ds.get("username") or "", safe="")
+    pwd = quote(ds.get("password") or "", safe="")
     params: Dict[str, Any] = ds.get("params") or {}
 
     # Merge extra params into a query string
@@ -83,20 +88,25 @@ def build_engine_url(ds: Dict[str, Any]) -> str:
         # so PyMySQL connects directly — no per-vendor driver to bundle.
         default_port = {"mariadb": 3306, "oceanbase": 2881, "tidb": 4000}[dtype]
         return f"mysql+pymysql://{user}:{pwd}@{host}:{port or default_port}/{db}{qs({'charset': params.get('charset', 'utf8mb4')})}"
+    # psycopg2 has no default connect timeout; an unreachable host would then
+    # sit on the OS-level TCP timeout (~75 s on macOS, minutes on Linux). A
+    # 10 s default keeps failed connects and app shutdown responsive; users
+    # can override it via the connection params.
+    pg_extra = {"connect_timeout": params.get("connect_timeout", 10)}
     if dtype == "postgresql":
-        return f"postgresql+psycopg2://{user}:{pwd}@{host}:{port or 5432}/{db}{qs({})}"
+        return f"postgresql+psycopg2://{user}:{pwd}@{host}:{port or 5432}/{db}{qs(pg_extra)}"
     if dtype in ("opengauss", "highgo", "vastbase"):
         # OpenGauss / HighGo / Vastbase are all PostgreSQL-wire-compatible
         # (openGauss or PG forks), so psycopg2 connects directly.
         default_port = {"opengauss": 5432, "highgo": 5866, "vastbase": 5432}[dtype]
-        return f"postgresql+psycopg2://{user}:{pwd}@{host}:{port or default_port}/{db}{qs({})}"
+        return f"postgresql+psycopg2://{user}:{pwd}@{host}:{port or default_port}/{db}{qs(pg_extra)}"
     if dtype == "kingbase":
         # Prefer Kingbase's own ksycopg2 (bundled in the packaged app); fall
         # back to plain psycopg2 — KingbaseES also speaks the PostgreSQL wire
         # protocol, so either driver connects.
         if _has_module("ksycopg2"):
-            return f"kingbase+ksycopg2://{user}:{pwd}@{host}:{port or 54321}/{db}{qs({})}"
-        return f"postgresql+psycopg2://{user}:{pwd}@{host}:{port or 54321}/{db}{qs({})}"
+            return f"kingbase+ksycopg2://{user}:{pwd}@{host}:{port or 54321}/{db}{qs(pg_extra)}"
+        return f"postgresql+psycopg2://{user}:{pwd}@{host}:{port or 54321}/{db}{qs(pg_extra)}"
     if dtype == "oracle":
         # python-oracledb thin mode is pure Python: no Oracle Instant Client
         # needed. database may be a SID or a service name; caller decides.
@@ -107,10 +117,33 @@ def build_engine_url(ds: Dict[str, Any]) -> str:
     if dtype == "mssql":
         # pymssql wheels bundle FreeTDS: no unixODBC / msodbcsql system
         # packages, no "ODBC Driver 17" install required.
-        extra = {"charset": params.get("charset")}
+        #
+        # Named instances: only the *default* instance listens on 1433. For a
+        # named instance we put "host\instance" into the server string and omit
+        # the port, letting SQL Browser (UDP 1434) resolve the dynamic port.
+        # pymssql ignores the port whenever an instance is present, so adding
+        # ":1433" here would only produce a malformed "host\instance:1433".
+        instance = str(ds.get("instance") or "").strip().strip("\\")
+        if "\\" in instance:
+            instance = instance.split("\\", 1)[0].strip()
+        if "\\" in host:
+            # Tolerate users typing "host\instance" into the host field.
+            host, host_instance = host.split("\\", 1)
+            instance = instance or host_instance.split("\\", 1)[0].strip()
+        host = host.strip()
+        if instance:
+            host = f"{host}\\{instance}"
+            port = 0
+        # pymssql defaults login_timeout to 60 s; 10 s fails fast on an
+        # unreachable host (user-overridable via connection params).
+        extra = {
+            "charset": params.get("charset"),
+            "login_timeout": params.get("login_timeout", 10),
+        }
         if params.get("tds_version"):
             extra["tds_version"] = params["tds_version"]
-        return f"mssql+pymssql://{user}:{pwd}@{host}:{port or 1433}/{db}{qs(extra)}"
+        port_part = "" if instance else f":{port or 1433}"
+        return f"mssql+pymssql://{user}:{pwd}@{host}{port_part}/{db}{qs(extra)}"
     if dtype == "db2":
         # IBM's official ibm_db_sa dialect; ibm_db wheels bundle the DB2
         # client (clidriver) for win/linux/mac, no separate DB2 client install.
@@ -161,7 +194,10 @@ def create_db_engine(ds: Dict[str, Any]) -> Engine:
         # lazily so merely selecting a DM data source without the
         # Windows/Linux-only wheel never raises at engine-construction time.
         host = ds.get("host") or "localhost"
-        port = int(ds.get("port") or 5236)
+        try:
+            port = int(ds.get("port") or 5236)
+        except (TypeError, ValueError):
+            port = 5236
         username = ds.get("username") or ""
         password = ds.get("password") or ""
 
@@ -177,12 +213,142 @@ def create_db_engine(ds: Dict[str, Any]) -> Engine:
     return create_engine(url, **engine_kwargs)
 
 
+# --- Engine cache ---
+# Every schema fetch / SQL execution used to build its own Engine and dispose
+# it afterwards, paying a fresh TCP + TLS + auth handshake each time. Paging
+# through a result set made that noticeable on remote databases. Engines are
+# cheap to keep: SQLAlchemy pools the underlying DBAPI connections and
+# pool_pre_ping revalidates one before each use, so a long-idle entry is safe.
+#
+# The cache key includes every field that affects the connection (including the
+# password), so editing a data source naturally misses into a new engine. Only
+# a handful are kept so credentials from deleted/edited sources don't linger.
+_MAX_CACHED_ENGINES = 4
+_ENGINE_CACHE: "OrderedDict[tuple, Engine]" = OrderedDict()
+_ENGINE_LOCK = threading.Lock()
+
+
+def _engine_cache_key(ds: Dict[str, Any]) -> tuple:
+    params = ds.get("params")
+    if not isinstance(params, dict):
+        params = {}
+    return (
+        str(ds.get("type") or "").lower(),
+        str(ds.get("host") or ""),
+        str(ds.get("port") or ""),
+        str(ds.get("database") or ""),
+        str(ds.get("username") or ""),
+        str(ds.get("password") or ""),
+        str(ds.get("instance") or ""),
+        str(ds.get("lib_dir") or ""),
+        tuple(sorted((str(k), str(v)) for k, v in params.items())),
+    )
+
+
+def get_engine(ds: Dict[str, Any]) -> Engine:
+    """Return a cached Engine for ``ds``, creating and caching one on a miss.
+
+    Callers must not ``dispose()`` the returned engine: it is shared with other
+    workers. Use :func:`dispose_engines` once at application shutdown.
+    """
+    key = _engine_cache_key(ds)
+    with _ENGINE_LOCK:
+        engine = _ENGINE_CACHE.get(key)
+        if engine is not None:
+            _ENGINE_CACHE.move_to_end(key)
+            return engine
+
+    # Build outside the lock — URL construction/driver import can be slow and
+    # must not block workers using other data sources.
+    engine = create_db_engine(ds)
+
+    stale: List[Engine] = []
+    with _ENGINE_LOCK:
+        existing = _ENGINE_CACHE.get(key)
+        if existing is not None:
+            # Another thread won the race; keep theirs and drop ours.
+            _ENGINE_CACHE.move_to_end(key)
+            stale.append(engine)
+        else:
+            _ENGINE_CACHE[key] = engine
+            while len(_ENGINE_CACHE) > _MAX_CACHED_ENGINES:
+                stale.append(_ENGINE_CACHE.popitem(last=False)[1])
+    # Dispose unused engines outside the lock (closing sockets can block).
+    for old in stale:
+        try:
+            old.dispose()
+        except Exception:
+            pass
+    return existing if existing is not None else engine
+
+
+def dispose_engines() -> None:
+    """Close every pooled connection; call on application shutdown."""
+    with _ENGINE_LOCK:
+        engines = list(_ENGINE_CACHE.values())
+        _ENGINE_CACHE.clear()
+    for engine in engines:
+        try:
+            engine.dispose()
+        except Exception:
+            pass
+
+
+def _connection_error_detail(e: Exception) -> str:
+    """Best-effort readable text for a DBAPI / SQLAlchemy error.
+
+    pymssql can raise ``OperationalError`` with an empty message (FreeTDS
+    reports some connection failures only through side channels), which would
+    otherwise render as a bare ``(pymssql.exceptions.OperationalError)``. Fall
+    back to ``orig`` / ``args`` / ``repr`` so the toast always carries a clue.
+    """
+    orig = getattr(e, "orig", e)
+    text = str(orig).strip()
+    if text:
+        return text
+    args = getattr(orig, "args", ())
+    if args:
+        return ", ".join(repr(a) for a in args)
+    return f"{type(orig).__name__}（驱动未提供错误信息）"
+
+
+def _mssql_error_hint(ds: Dict[str, Any], detail: str) -> str:
+    """Actionable next step for SQL Server connection failures."""
+    host = ds.get("host") or "localhost"
+    instance = str(ds.get("instance") or "").strip()
+    if instance:
+        target = f"{host}\\{instance}（端口由 SQL Browser 解析）"
+    elif "\\" in host:
+        target = f"{host}（端口由 SQL Browser 解析）"
+    else:
+        try:
+            target_port = int(ds.get("port") or 1433)
+        except (TypeError, ValueError):
+            target_port = 1433
+        target = f"{host}:{target_port}"
+
+    low = detail.lower()
+    if "login failed" in low:
+        step = ("若密码无误，请确认 SQL Server 已启用「SQL Server 和 Windows 身份验证」"
+                "模式，且 sa 账号已启用（Navicat 可能用的是 Windows 认证）。")
+    elif (not detail or "未提供错误信息" in detail or "20009" in detail
+          or "unable to connect" in low or "adaptive server" in low
+          or "unknown error" in low):
+        step = ("若为命名实例，请填写「实例名」；否则确认 TCP/IP 协议已启用且该端口已监听。"
+                "SQL Server 2008 R2 可在连接参数填 {\"tds_version\": \"7.3\"}。")
+    else:
+        step = "SQL Server 2008 R2 等老版本可尝试在连接参数填 {\"tds_version\": \"7.3\"}。"
+    return f"连接目标: {target}。{step}"
+
+
 def test_connection(ds: Dict[str, Any]) -> Tuple[bool, str]:
     """Try connecting; returns (ok, message)."""
     dtype = (ds.get("type") or "").lower()
     try:
         engine = create_db_engine(ds)
-    except ModuleNotFoundError as e:
+    except ImportError as e:
+        # SQLAlchemy surfaces a missing DBAPI/dialect as ImportError with
+        # "No module named ..." — not always ModuleNotFoundError.
         hint = DRIVER_HINTS.get(dtype, {})
         return False, f"缺少驱动: {e}\n请安装: {hint.get('install', '')}"
     except ValueError as e:
@@ -193,15 +359,25 @@ def test_connection(ds: Dict[str, Any]) -> Tuple[bool, str]:
 
     try:
         # Oracle (pre-23c) and DM require a FROM clause; DUAL exists on both.
-        ping = "SELECT 1 FROM DUAL" if dtype in ("oracle", "dm", "db2") else "SELECT 1"
+        # DB2 has no DUAL — its single-row dummy table is SYSIBM.SYSDUMMY1.
+        if dtype in ("oracle", "dm"):
+            ping = "SELECT 1 FROM DUAL"
+        elif dtype == "db2":
+            ping = "SELECT 1 FROM SYSIBM.SYSDUMMY1"
+        else:
+            ping = "SELECT 1"
         with engine.connect() as conn:
             conn.execute(text(ping))
         return True, "连接成功！"
-    except ModuleNotFoundError as e:
+    except ImportError as e:
         hint = DRIVER_HINTS.get((ds.get("type") or "").lower(), {})
         return False, f"缺少驱动: {e}\n请安装: {hint.get('install', '')}"
     except Exception as e:
-        return False, f"连接失败: {e}"
+        detail = _connection_error_detail(e)
+        msg = f"连接失败: {detail}" if detail else "连接失败"
+        if dtype == "mssql":
+            msg += f"\n{_mssql_error_hint(ds, detail)}"
+        return False, msg
     finally:
         try:
             engine.dispose()
@@ -218,14 +394,48 @@ MAX_SCHEMA_TABLES = 200
 MAX_SCHEMA_CHARS = 20000
 
 
-def introspect_schema(engine: Engine) -> List[Dict[str, Any]]:
-    """Return a dialect-neutral description of tables/views in the default schema.
+def _multi_reflection(insp, method: str, names: List[str]) -> Dict[str, Any]:
+    """Call an SQLAlchemy 2.0 ``get_multi_*`` reflection method if supported.
+
+    Returns ``{table_name: value}`` with schema-qualified keys normalized to
+    the bare table name; an empty dict means this dialect can't batch-reflect
+    that kind of metadata and callers should fall back to per-table calls.
+    """
+    fn = getattr(insp, method, None)
+    if not callable(fn):
+        return {}
+    try:
+        raw = fn(filter_names=names)
+    except Exception:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    for key, value in raw.items():
+        # Single-schema inspectors may key by (schema, table) tuples.
+        name = key[-1] if isinstance(key, tuple) else str(key).rsplit(".", 1)[-1]
+        out[name] = value
+    return out
+
+
+def introspect_schema(
+    engine: Engine, limit: Optional[int] = None, query: str = ""
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Return (tables, total_count) for the default schema.
 
     Uses SQLAlchemy's Inspector rather than per-dialect ``information_schema``
     SQL, so MySQL / PostgreSQL / Oracle / SQL Server / the PG-compatible
     domestic databases all go through the same code path. Anything a given
     dialect can't provide (column comments are not introspected on PostgreSQL,
     for instance) simply degrades to empty instead of failing.
+
+    ``limit`` caps the number of tables we fetch columns/FKs for. Metadata
+    queries are per table, so on a database with thousands of tables this is
+    the difference between a second and minutes; ``total_count`` still reports
+    how many exist so the prompt note stays accurate. When more tables exist
+    than ``limit``, names are pre-ranked against ``query`` — otherwise a
+    relevant table sorted past the limit would never reach the finer ranking in
+    :func:`build_schema_section` (which needs columns to score).
     """
     insp = inspect(engine)
 
@@ -236,13 +446,36 @@ def introspect_schema(engine: Engine) -> List[Dict[str, Any]]:
             names += [(n, "view") for n in get_views()]
         except Exception:
             pass
+    total = len(names)
+    if limit is not None:
+        q = _tokens(query) if query else set()
+        if total > limit and q:
+            order = sorted(
+                range(total),
+                key=lambda i: (-len(q & _tokens(names[i][0])), i),
+            )
+            names = [names[i] for i in order[:limit]]
+        else:
+            names = names[:limit]
+
+    # Batch metadata where the dialect supports it (SQLAlchemy 2.0): one query
+    # for columns, one for PKs, etc. instead of ~4 round-trips per table, which
+    # dominates schema loading on a remote database. Views / dialects without
+    # batch support transparently fall back to the per-table calls below.
+    table_names = [n for n, _ in names]
+    bulk_cols = _multi_reflection(insp, "get_multi_columns", table_names)
+    bulk_pks = _multi_reflection(insp, "get_multi_pk_constraint", table_names)
+    bulk_fks = _multi_reflection(insp, "get_multi_foreign_keys", table_names)
+    bulk_comments = _multi_reflection(insp, "get_multi_table_comment", table_names)
 
     tables: List[Dict[str, Any]] = []
     for name, kind in names:
-        try:
-            raw_cols = insp.get_columns(name)
-        except Exception:
-            raw_cols = []
+        raw_cols = bulk_cols.get(name)
+        if raw_cols is None:
+            try:
+                raw_cols = insp.get_columns(name)
+            except Exception:
+                raw_cols = []
         columns = [
             {
                 "name": c.get("name", ""),
@@ -254,14 +487,20 @@ def introspect_schema(engine: Engine) -> List[Dict[str, Any]]:
             for c in raw_cols
         ]
 
-        try:
-            pk = list(insp.get_pk_constraint(name).get("constrained_columns") or [])
-        except Exception:
-            pk = []
-        try:
-            raw_fks = insp.get_foreign_keys(name)
-        except Exception:
-            raw_fks = []
+        pk_entry = bulk_pks.get(name)
+        if not isinstance(pk_entry, dict):
+            try:
+                pk_entry = insp.get_pk_constraint(name) or {}
+            except Exception:
+                pk_entry = {}
+        pk = list(pk_entry.get("constrained_columns") or [])
+
+        raw_fks = bulk_fks.get(name)
+        if not isinstance(raw_fks, list):
+            try:
+                raw_fks = insp.get_foreign_keys(name)
+            except Exception:
+                raw_fks = []
         fks = [
             {
                 "cols": list(fk.get("constrained_columns") or []),
@@ -272,17 +511,21 @@ def introspect_schema(engine: Engine) -> List[Dict[str, Any]]:
             if fk.get("referred_table")
         ]
 
-        comment = ""
-        try:
-            comment = (insp.get_table_comment(name) or {}).get("text") or ""
-        except Exception:
-            pass
+        comment_entry = bulk_comments.get(name)
+        if isinstance(comment_entry, dict):
+            comment = comment_entry.get("text") or ""
+        else:
+            comment = ""
+            try:
+                comment = (insp.get_table_comment(name) or {}).get("text") or ""
+            except Exception:
+                pass
 
         tables.append(
             {"name": name, "kind": kind, "comment": comment, "pk": pk,
              "columns": columns, "fks": fks}
         )
-    return tables
+    return tables, total
 
 
 def render_table(t: Dict[str, Any]) -> str:
@@ -321,7 +564,7 @@ def render_table(t: Dict[str, Any]) -> str:
 
 
 _TOKEN_RE = re.compile(r"[a-z0-9_]{2,}")
-_CJK_RE = re.compile(r"[一-鿿]")
+_CJK_RUN_RE = re.compile(r"[一-鿿]+")
 
 
 def _tokens(text: str) -> set:
@@ -331,10 +574,16 @@ def _tokens(text: str) -> set:
     overlapping 2-character sequences — "数学" in the question then matches the
     "数学" bigram in a column comment like "数学成绩".
     """
-    low = (text or "").lower()
-    toks = set(_TOKEN_RE.findall(low))
-    cjk = _CJK_RE.findall(low)
-    toks.update(cjk[i] + cjk[i + 1] for i in range(len(cjk) - 1))
+    low = str(text or "").lower()
+    raw = _TOKEN_RE.findall(low)
+    toks = set(raw)
+    # Identifier-style tokens ("student_info") also contribute their parts, so
+    # an English question saying "student" matches the table name.
+    toks.update(part for tok in raw for part in tok.split("_") if len(part) >= 2)
+    # Bigrams only within contiguous CJK runs: joining characters across a
+    # space/punctuation ("订单 明细" -> "单明") would create phantom matches.
+    for run in _CJK_RUN_RE.findall(low):
+        toks.update(run[i:i + 2] for i in range(len(run) - 1))
     return toks
 
 
@@ -371,6 +620,7 @@ def _rank_tables(tables: List[Dict[str, Any]], query: str) -> List[float]:
 def build_schema_section(
     tables: List[Dict[str, Any]], description: str = "",
     max_chars: int = MAX_SCHEMA_CHARS, max_tables: int = MAX_SCHEMA_TABLES,
+    total_tables: Optional[int] = None,
 ) -> Tuple[str, int, int]:
     """Render the schema for the prompt, trimming if it exceeds the budget.
 
@@ -379,7 +629,7 @@ def build_schema_section(
     bigrams) and the most relevant are kept, with a note about how many were
     omitted.
     """
-    all_n = len(tables)
+    all_n = len(tables) if total_tables is None else total_tables
     considered = tables[:max_tables]
     beyond_cap = max(0, all_n - max_tables)
     blocks = [render_table(t) for t in considered]
@@ -419,38 +669,158 @@ def fetch_schema_text(
 ) -> Tuple[str, int, int]:
     """Open the data source, introspect it, and return (section, shown, total).
 
-    Opens and disposes its own engine; callers run this on a worker thread.
+    Uses the shared engine cache; callers run this on a worker thread.
     """
-    engine = create_db_engine(ds)
-    try:
-        tables = introspect_schema(engine)
-        return build_schema_section(tables, description, max_chars, max_tables)
-    finally:
-        try:
-            engine.dispose()
-        except Exception:
-            pass
+    engine = get_engine(ds)
+    # Only max_tables are ever considered below, so don't pay for metadata
+    # queries on the rest; names are ranked against the question first so
+    # the cap keeps the relevant tables rather than the first N by name.
+    tables, total = introspect_schema(engine, limit=max_tables, query=description)
+    return build_schema_section(
+        tables, description, max_chars, max_tables, total_tables=total
+    )
 
 
 # --- SQL execution ---
 
-_SELECT_RE = re.compile(r"^\s*(SELECT|WITH|SHOW|DESC|DESCRIBE|EXPLAIN)\b", re.IGNORECASE)
+_LEADING_COMMENT_RE = re.compile(
+    r"^\s*(?:(?:--[^\n]*(?:\n|$))|(?:#[^\n]*(?:\n|$))|(?:/\*.*?\*/\s*))*",
+    re.DOTALL,
+)
+_KEYWORD_RE = re.compile(r"[\(\s]*([A-Za-z_]+)")
+_SELECT_KEYWORDS = {"SELECT", "WITH", "SHOW", "DESC", "DESCRIBE", "EXPLAIN"}
+
+
+def leading_keyword(sql: str) -> str:
+    """First significant keyword, ignoring leading comments and parentheses.
+
+    ``-- report\\nSELECT ...`` and ``(SELECT ...) UNION ...`` must still be
+    recognized as queries, otherwise they fall into the non-SELECT execution
+    path and return no rows.
+    """
+    text = _LEADING_COMMENT_RE.sub("", sql or "")
+    m = _KEYWORD_RE.match(text)
+    return m.group(1).upper() if m else ""
 
 
 def is_select(sql: str) -> bool:
-    return bool(_SELECT_RE.match(sql or ""))
+    return leading_keyword(sql) in _SELECT_KEYWORDS
 
 
 # --- SQL pre-check ---
 
 
-def precheck_sql(sql: str) -> Tuple[bool, str]:
+_MYSQL_FAMILY = {"mysql", "mariadb", "oceanbase", "tidb", "gbase"}
+
+
+def _delimiter_error(sql: str, hash_comments: bool, backslash_escapes: bool) -> str:
+    """Scan SQL for unbalanced parens/quotes, ignoring comments and literals.
+
+    A naive ``count("(")`` breaks on literals such as ``'销售(华东'`` and a
+    ``re.sub`` for ``--`` breaks on ``'a--b'``; this single-pass scanner keeps
+    string literals, quoted identifiers and comments out of the count.
+    """
+    depth = 0
+    i, n = 0, len(sql)
+    in_squote = in_dquote = in_backtick = in_bracket = False
+    in_line_comment = in_block_comment = False
+
+    while i < n:
+        ch = sql[i]
+        nxt = sql[i + 1] if i + 1 < n else ""
+
+        if in_line_comment:
+            if ch == "\n":
+                in_line_comment = False
+            i += 1
+            continue
+        if in_block_comment:
+            if ch == "*" and nxt == "/":
+                in_block_comment = False
+                i += 2
+            else:
+                i += 1
+            continue
+        if in_squote:
+            if backslash_escapes and ch == "\\" and nxt:
+                i += 2  # MySQL backslash escape; standard SQL keeps it literal
+                continue
+            if ch == "'":
+                if nxt == "'":
+                    i += 2  # SQL doubled quote
+                    continue
+                in_squote = False
+            i += 1
+            continue
+        if in_dquote:
+            if ch == '"':
+                if nxt == '"':
+                    i += 2
+                    continue
+                in_dquote = False
+            i += 1
+            continue
+        if in_backtick:
+            if ch == "`":
+                in_backtick = False
+            i += 1
+            continue
+        if in_bracket:
+            if ch == "]":
+                in_bracket = False
+            i += 1
+            continue
+
+        if ch == "-" and nxt == "-":
+            in_line_comment = True
+            i += 2
+            continue
+        if hash_comments and ch == "#":
+            in_line_comment = True
+            i += 1
+            continue
+        if ch == "/" and nxt == "*":
+            in_block_comment = True
+            i += 2
+            continue
+        if ch == "'":
+            in_squote = True
+        elif ch == '"':
+            in_dquote = True
+        elif ch == "`":
+            in_backtick = True
+        elif ch == "[":
+            in_bracket = True
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth < 0:
+                return "圆括号不匹配"
+        i += 1
+
+    if in_squote:
+        return "单引号不闭合"
+    if in_dquote or in_backtick or in_bracket:
+        return "引号不闭合"
+    if in_block_comment:
+        return "块注释未闭合"
+    if depth != 0:
+        return "圆括号不匹配"
+    return ""
+
+
+def precheck_sql(sql: str, db_type: str = "") -> Tuple[bool, str]:
     """Cheap syntactic sanity check on AI-generated SQL.
 
     Returns (ok, message). This is a fail-fast layer that catches the common
     ways AI output goes wrong (empty output, only comments, unbalanced
     delimiters). It does NOT parse SQL fully — that's the database's job at
     execute time.
+
+    ``db_type`` only selects dialect quirks that matter for the scan: ``#`` is
+    a comment in the MySQL family but starts a temp-table name in SQL Server
+    (``SELECT * FROM #tmp``).
     """
     if not sql or not sql.strip():
         return False, "SQL 为空"
@@ -481,17 +851,12 @@ def precheck_sql(sql: str) -> Tuple[bool, str]:
         # sqlparse is very tolerant, so this really is unusual.
         pass
 
-    # Balanced parentheses & quotes
-    if stripped.count("(") != stripped.count(")"):
-        return False, "圆括号不匹配"
-    # Count quotes only after stripping line comments (a stray apostrophe in a
-    # -- comment must not be mistaken for an unterminated string). Also remove
-    # backslash-escaped quotes and SQL-doubled quotes ('').
-    no_comments = re.sub(r"--[^\n]*", "", stripped)
-    no_comments = re.sub(r"(?m)#[^\n]*", "", no_comments)  # MySQL # comments
-    no_comments = no_comments.replace("\\'", "").replace("''", "")
-    if no_comments.count("'") % 2 != 0:
-        return False, "单引号不闭合"
+    # Balanced parentheses & quotes (literals/comments excluded).
+    is_mysql = db_type.lower() in _MYSQL_FAMILY or not db_type
+    err = _delimiter_error(stripped, hash_comments=is_mysql,
+                           backslash_escapes=is_mysql)
+    if err:
+        return False, err
 
     return True, ""
 
@@ -510,11 +875,16 @@ def build_paginated_sql(sql: str, dtype: str, offset: int, limit: int) -> str:
                  "kingbase", "oceanbase", "tidb", "gbase"):
         return f"SELECT * FROM ({body}) AS __t LIMIT {limit} OFFSET {offset}"
     if dtype == "mssql":
-        # SQL Server 2012+ syntax. OFFSET requires a preceding ORDER BY —
-        # ORDER BY (SELECT NULL) is the documented constant-expression escape
-        # for queries that don't have a meaningful ordering.
-        return (f"SELECT * FROM ({body}) __t ORDER BY (SELECT NULL) "
-                f"OFFSET {offset} ROWS FETCH NEXT {limit} ROWS ONLY")
+        # OFFSET/FETCH only exists on SQL Server 2012+; 2005–2008 R2 need the
+        # ROW_NUMBER() form. The trailing __muask_rn column is stripped by the
+        # execution worker before the rows reach the table view.
+        return (
+            "SELECT * FROM ("
+            "SELECT __t.*, ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS __muask_rn "
+            f"FROM ({body}) __t"
+            f") __p WHERE __p.__muask_rn > {offset} "
+            f"AND __p.__muask_rn <= {offset + limit}"
+        )
     if dtype in ("oracle", "db2"):
         # SQL:2008 syntax - Oracle 12c+, DB2 11+ (neither requires ORDER BY)
         return f"SELECT * FROM ({body}) __t OFFSET {offset} ROWS FETCH NEXT {limit} ROWS ONLY"
@@ -539,6 +909,30 @@ def run_select(engine: Engine, sql: str) -> Tuple[List[str], List[Tuple[Any, ...
         cols = list(result.keys())
         rows = [tuple(r) for r in result.fetchall()]
         return cols, rows
+
+
+def run_select_slice(
+    engine: Engine, sql: str, offset: int, limit: int
+) -> Tuple[List[str], List[Tuple[Any, ...]], bool]:
+    """Client-side pagination fallback for SQL that cannot be wrapped.
+
+    Derived-table wrapping fails for statements starting with ``WITH`` and for
+    SQL Server queries with a top-level ``ORDER BY``. Streaming the original
+    statement and skipping ``offset`` rows keeps those queries usable instead
+    of failing outright. Returns ``(cols, rows, has_more)``.
+    """
+    rows: List[Tuple[Any, ...]] = []
+    with engine.connect() as conn:
+        result = conn.execution_options(stream_results=True).execute(text(sql))
+        cols = list(result.keys())
+        for idx, row in enumerate(result):
+            if idx < offset:
+                continue
+            if len(rows) > limit:  # fetch one extra row to detect a next page
+                break
+            rows.append(tuple(row))
+    has_more = len(rows) > limit
+    return cols, rows[:limit], has_more
 
 
 def run_scalar(engine: Engine, sql: str) -> Any:

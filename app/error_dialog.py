@@ -5,7 +5,6 @@ from SQLAlchemy) without letting them overrun the result panel.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
     QVBoxLayout, QWidget,

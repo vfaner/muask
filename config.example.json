@@ -11,6 +11,17 @@
       "params": {"charset": "utf8mb4"}
     },
     {
+      "name": "SQLServer命名实例",
+      "type": "mssql",
+      "host": "192.168.1.10",
+      "port": 0,
+      "instance": "SQLEXPRESS",
+      "database": "demo",
+      "username": "sa",
+      "password": "",
+      "params": {"tds_version": "7.3"}
+    },
+    {
       "name": "达梦测试",
       "type": "dm",
       "host": "192.168.1.100",
@@ -21,13 +32,18 @@
       "params": {}
     }
   ],
-  "ai_config": {
-    "provider": "openai",
-    "api_base": "https://api.openai.com/v1",
-    "api_key": "",
-    "model": "gpt-4o-mini",
-    "temperature": 0.2
-  },
+  "ai_configs": [
+    {
+      "name": "默认",
+      "provider": "openai",
+      "protocol": "openai",
+      "api_base": "https://api.openai.com/v1",
+      "api_key": "",
+      "model": "gpt-4o-mini",
+      "temperature": 0.2
+    }
+  ],
+  "current_ai_config": "默认",
   "current_data_source": "本地MySQL",
   "ui_settings": {
     "page_size": 20

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import webbrowser
 from typing import Optional
 
 from PySide6.QtCore import QByteArray, QPoint, QSize, Qt, QTimer, Signal
@@ -13,6 +12,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QWidget
 from . import __version__
 from .donate_dialog import DonateDialog
 from .paths import resource_path
+from .ui_common import open_url
 from .update_dialog import UpdateAvailableDialog
 from .updater import UpdateCheckWorker
 
@@ -167,7 +167,13 @@ class TitleBar(QWidget):
         )
 
     def _maybe_show_update_dialog(self) -> None:
-        if self._update_latest:
+        # The 300 ms auto-open timer can fire while a dialog the user opened by
+        # clicking the pill is already running (modal exec() spins the event
+        # loop); without this guard a second dialog would stack on top.
+        if not self._update_latest or self._update_dialog_open:
+            return
+        self._update_dialog_open = True
+        try:
             dlg = UpdateAvailableDialog(
                 self._update_latest, self._update_notes,
                 self._update_url or GITHUB_REPO_URL,
@@ -176,16 +182,15 @@ class TitleBar(QWidget):
             dlg.exec()
             # 用户看完后红点可以消掉，避免一直挂着
             self.update_dot.hide()
+        finally:
+            self._update_dialog_open = False
 
     def _on_pill_clicked(self) -> None:
         if self._update_latest:
             self._maybe_show_update_dialog()
         else:
             # 已是最新 / 检查失败 → 打开项目主页
-            try:
-                webbrowser.open(GITHUB_REPO_URL, new=2)
-            except Exception:
-                pass
+            open_url(GITHUB_REPO_URL)
 
     def _set_pill_style(self, color: str, text: str) -> None:
         """
@@ -202,7 +207,6 @@ class TitleBar(QWidget):
             "orange": "#e8891a",
         }
         fg = palettes[color]
-        self._pill_color = color
         self.version_pill.setIcon(_render_svg_icon(os.path.join(ASSETS_DIR, "tag.svg"), size=13, color=fg))
         self.version_pill.setIconSize(QSize(13, 13))
         self.version_pill.setText(f"  {text}")
@@ -259,7 +263,6 @@ class TitleBar(QWidget):
         self.version_pill.setCursor(Qt.PointingHandCursor)
         self.version_pill.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.version_pill.setToolTip("正在检查更新…")
-        self._pill_color = "gray"
         self._set_pill_style("gray", f"v{__version__}")
         self.version_pill.clicked.connect(self._on_pill_clicked)
         row.addWidget(self.version_pill)
@@ -276,6 +279,7 @@ class TitleBar(QWidget):
         self._update_url: Optional[str] = None
         self._update_latest: Optional[str] = None
         self._update_notes: str = ""
+        self._update_dialog_open = False
 
         # --- Donate button (icon + "捐赠" text, both clickable) ---
         self.btn_donate = QToolButton()

@@ -28,7 +28,7 @@ QToolButton#titleIconBtn {
     color: #ffffff;
     font-size: 13px;
     font-weight: 500;
-    /* Gap between icon and text (icon + "项目地址" / icon + "捐赠") */
+    /* Gap between icon and text (icon + "捐赠" etc.) */
     spacing: 6px;
 }
 QToolButton#titleIconBtn:hover {

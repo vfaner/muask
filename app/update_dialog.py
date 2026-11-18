@@ -1,24 +1,13 @@
 """新版可用提示框：显示最新版本号、更新说明、下载按钮。"""
 from __future__ import annotations
 
-import webbrowser
-
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QVBoxLayout, QWidget,
+    QDialog, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout,
 )
 
 from . import __version__
-
-
-def _open_url(url: str) -> None:
-    if not QDesktopServices.openUrl(QUrl(url)):
-        try:
-            webbrowser.open(url, new=2)
-        except Exception:
-            pass
+from .ui_common import open_url
 
 
 class UpdateAvailableDialog(QDialog):
@@ -49,6 +38,9 @@ class UpdateAvailableDialog(QDialog):
         # 更新说明（可滚动）
         notes_label = QLabel(notes or "（暂无更新说明）")
         notes_label.setWordWrap(True)
+        # Release notes are raw Markdown/plain text; without this, any "<...>"
+        # in them is parsed as HTML and silently disappears.
+        notes_label.setTextFormat(Qt.PlainText)
         notes_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         notes_label.setStyleSheet(
             "background:#f8fafc; border:1px solid #e6ebf2; border-radius:8px;"
@@ -78,5 +70,5 @@ class UpdateAvailableDialog(QDialog):
         lay.addLayout(btn_row)
 
     def _on_download(self) -> None:
-        _open_url(self._release_url)
+        open_url(self._release_url)
         self.accept()

@@ -252,7 +252,7 @@ Every type in the dropdown builds its connection URL automatically and connects 
 | DB2 | ibm_db + ibm-db-sa (IBM official; clidriver bundled) | DB2 protocol (50000) | ✅ bundled | ✅ bundled |
 | Custom | your own | put `{"url": "..."}` in connection params | install the driver yourself | install the driver yourself |
 
-> **SQL Server named instances**: fill in the “Instance name” field (e.g. `SQLEXPRESS`, `PC`) and leave the port empty — the app resolves the dynamic port through SQL Browser. Only default instances use 1433. For older servers such as SQL Server 2008 R2, add `{"tds_version": "7.3"}` to the connection params if negotiation fails.
+> **SQL Server named instances**: fill in the “Instance name” field (e.g. `SQLEXPRESS`, `PC`) and leave the port empty — the app resolves the dynamic port through SQL Browser. Only default instances use 1433. If the SQL Server Browser service is stopped or UDP 1434 is blocked, put the instance's TCP port in the port field instead (SQL Server Configuration Manager → SQL Server Network Configuration → TCP/IP → IP Addresses); Browser discovery is then skipped. For older servers such as SQL Server 2008 R2, add `{"tds_version": "7.3"}` to the connection params if negotiation fails.
 
 > **ShenTong (神通) / YashanDB (崖山) / H2** are not built-in types: ShenTong publishes only JDBC / ODBC drivers; YashanDB's Python driver is not distributed on PyPI; and H2 is a pure-Java engine that requires a JVM plus `h2.jar` on the user's machine (defeating the “connects out of the box” goal). Use the “custom” data source type and supply your own driver and URL. OceanBase **Oracle tenants** likewise need “custom” (MySQL tenants are built in).
 

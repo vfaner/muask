@@ -254,7 +254,7 @@ python main.py
 | DB2 | ibm_db + ibm-db-sa（IBM 官方，wheel 自带 clidriver） | DB2 协议（50000） | ✅ 内置 | ✅ 内置 |
 | 其他（自定义） | 自备 | 「连接参数」中填 `{"url": "..."}` | 自行安装驱动 | 自行安装驱动 |
 
-> **SQL Server 命名实例**：在数据源页填写「实例名」（如 `SQLEXPRESS`、`PC`）并留空端口，程序会通过 SQL Browser 自动解析动态端口；默认实例才使用 1433。SQL Server 2008 R2 等老版本若连接协商失败，可在「连接参数」填 `{"tds_version": "7.3"}`。
+> **SQL Server 命名实例**：在数据源页填写「实例名」（如 `SQLEXPRESS`、`PC`）并留空端口，程序会通过 SQL Browser 自动解析动态端口；默认实例才使用 1433。若服务器未启动「SQL Server Browser」服务、或防火墙不放行 UDP 1434，可在「端口」栏直接填写该实例的 TCP 端口（SQL Server 配置管理器 → SQL Server 网络配置 → TCP/IP → IP 地址 中查看），此时会跳过 Browser 解析。SQL Server 2008 R2 等老版本若连接协商失败，可在「连接参数」填 `{"tds_version": "7.3"}`。
 
 > **神通（ShenTong）/ 崖山 YashanDB / H2 未列入内置类型**：神通官方仅发布 JDBC / ODBC 驱动；崖山官方 Python 驱动不通过 PyPI 分发；H2 是纯 Java 引擎，必须本机装有 JVM 和 `h2.jar` 才能经 JDBC 桥接入——都与「开箱直连」目标冲突。需要连接时请选「其他（自定义）」，自行安装桥接驱动并提供 SQLAlchemy 连接串。OceanBase 的 **Oracle 租户**同理（MySQL 租户已内置）。
 

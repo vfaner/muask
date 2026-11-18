@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from .config import ConfigManager, DB_TYPES
+from .error_dialog import show_error
 from . import toast
 from .workers import DBTestWorker
 
@@ -27,6 +28,10 @@ class DataSourcePage(QWidget):
         self.cfg = cfg
         self._current_name: Optional[str] = None
         self._test_worker: Optional[DBTestWorker] = None
+        # True while the port box holds a program-filled default (not typed by
+        # the user). Used to switch back to "auto" when an instance name is
+        # entered — see _sync_mssql_ui.
+        self._port_auto = True
 
         self._build_ui()
         self._refresh_list()
@@ -91,6 +96,12 @@ class DataSourcePage(QWidget):
         self.port_edit = QLineEdit("3306")
         self.port_edit.setValidator(QIntValidator(0, 65535, self))
         self.port_edit.setMaximumWidth(110)
+        self.port_edit.setToolTip(
+            "留空 = 使用该类型的默认端口；SQL Server 命名实例留空则由 SQL Browser 解析实际端口"
+        )
+        # textEdited fires only on real keystrokes/paste, not setText() — that
+        # distinction is exactly what _port_auto needs.
+        self.port_edit.textEdited.connect(self._on_port_edited)
 
         self.db_edit = QLineEdit()
         self.user_edit = QLineEdit()
@@ -184,7 +195,8 @@ class DataSourcePage(QWidget):
         self.type_combo.setCurrentIndex(0)
         self.host_edit.setText("127.0.0.1")
         self.instance_edit.setText("")
-        self.port_edit.setText("3306")
+        self._port_auto = True
+        self.port_edit.setText(str(DB_TYPES[0][2]))
         self.db_edit.setText("")
         self.user_edit.setText("")
         self.pwd_edit.setText("")
@@ -202,13 +214,14 @@ class DataSourcePage(QWidget):
         self.type_combo.setCurrentIndex(idx)
         self.host_edit.setText(ds.get("host", ""))
         self.instance_edit.setText(ds.get("instance", "") or "")
-        has_instance = (ds.get("type") == "mssql"
-                        and (ds.get("instance") or "\\" in (ds.get("host") or "")))
         try:
-            port_text = str(int(ds.get("port") or 0))
+            port_val = int(ds.get("port") or 0)
         except (TypeError, ValueError):
-            port_text = "0"  # hand-edited non-numeric port: show a sane value
-        self.port_edit.setText("" if has_instance else port_text)
+            port_val = 0  # hand-edited non-numeric port: fall back to "auto"
+        # A stored port is shown even for named instances — it is the explicit
+        # TCP port that skips SQL Browser discovery. Blank means "auto".
+        self._port_auto = not port_val
+        self.port_edit.setText(str(port_val) if port_val else "")
         self.db_edit.setText(ds.get("database", ""))
         self.user_edit.setText(ds.get("username", ""))
         self.pwd_edit.setText(ds.get("password", ""))
@@ -225,6 +238,9 @@ class DataSourcePage(QWidget):
         dtype = self.type_combo.currentData()
         host = self.host_edit.text().strip()
         instance = self.instance_edit.text().strip().strip("\\") if dtype == "mssql" else ""
+        if dtype == "mssql" and "\\" in instance:
+            # Tolerate "HOST\INSTANCE" pasted into 实例名 — keep the instance.
+            instance = instance.rsplit("\\", 1)[-1].strip()
         if dtype == "mssql" and "\\" in host:
             # Also accept the legacy "host\instance" form typed into 主机地址.
             host, host_instance = host.split("\\", 1)
@@ -241,10 +257,6 @@ class DataSourcePage(QWidget):
             except ValueError:
                 toast.warning(self, "端口必须是 0–65535 的数字")
                 return None
-        if dtype == "mssql" and instance:
-            # pymssql ignores the port when an instance is given; SQL Browser
-            # resolves the dynamic port. Storing 0 keeps config.json honest.
-            port = 0
 
         params_txt = self.params_edit.toPlainText().strip()
         params: Dict[str, Any] = {}
@@ -309,23 +321,47 @@ class DataSourcePage(QWidget):
                     current_port = 0
                 if current_port in [3306, 5432, 1521, 1433, 5236, 54321, 5258,
                                     5866, 2881, 4000, 50000, 0]:
+                    self._port_auto = True
                     self.port_edit.setText(str(port))
                 break
 
+    def _on_port_edited(self, _text: str) -> None:
+        """The port was typed (or pasted) by the user — never auto-clear it."""
+        self._port_auto = False
+
     def _sync_mssql_ui(self, *_args) -> None:
-        """Show the instance field only for SQL Server; disable the port when
-        an instance name is present (pymssql ignores the port in that case)."""
+        """Show the instance field only for SQL Server, and keep it consistent.
+
+        The port stays editable even with an instance name: leaving it blank
+        lets SQL Browser (UDP 1434) resolve the dynamic port, while entering
+        the instance's real TCP port skips discovery — the workaround when the
+        Browser service or UDP 1434 is unavailable.
+
+        The auto-filled default (1433) is cleared as soon as an instance is
+        entered. An explicit port makes pymssql connect straight to
+        host:port and ignore the instance, so a dynamic-port named instance
+        would otherwise fail even though the instance name is correct. A port
+        the user typed themselves is left alone (some instances do listen on
+        the default port).
+        """
         is_mssql = self.type_combo.currentData() == "mssql"
         self.instance_edit.setVisible(is_mssql)
         self.instance_label.setVisible(is_mssql)
         if not is_mssql:
-            self.port_edit.setEnabled(True)
             self.port_edit.setPlaceholderText("")
             return
         use_instance = bool(self.instance_edit.text().strip()
                             or "\\" in self.host_edit.text())
-        self.port_edit.setEnabled(not use_instance)
-        self.port_edit.setPlaceholderText("自动（命名实例解析）" if use_instance else "")
+        if use_instance:
+            if self._port_auto and self.port_edit.text():
+                # Blank = let SQL Browser resolve the instance's real port.
+                self.port_edit.clear()
+            self.port_edit.setPlaceholderText("留空由 SQL Browser 解析；也可填实例实际端口")
+        else:
+            if self._port_auto and not self.port_edit.text():
+                default = next((p for _l, c, p in DB_TYPES if c == "mssql"), 1433)
+                self.port_edit.setText(str(default))
+            self.port_edit.setPlaceholderText("")
 
     def _on_browse_lib(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "选择自定义驱动的依赖目录")
@@ -407,7 +443,11 @@ class DataSourcePage(QWidget):
             if ok:
                 toast.success(self, msg or "连接成功")
             else:
-                toast.error(self, msg or "连接失败")
+                # Connection failures carry a multi-line diagnosis (driver
+                # error + what to check next). A toast cuts it off after two
+                # lines, so show the full text in the scrollable dialog.
+                show_error(self, summary="连接失败", detail=msg or "",
+                           title="连接测试失败")
 
         self._test_worker.finished_result.connect(done)
         self._test_worker.start()

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 import re
+import socket
 import threading
 from collections import OrderedDict
 from importlib.util import find_spec
@@ -118,22 +119,23 @@ def build_engine_url(ds: Dict[str, Any]) -> str:
         # pymssql wheels bundle FreeTDS: no unixODBC / msodbcsql system
         # packages, no "ODBC Driver 17" install required.
         #
-        # Named instances: only the *default* instance listens on 1433. For a
-        # named instance we put "host\instance" into the server string and omit
-        # the port, letting SQL Browser (UDP 1434) resolve the dynamic port.
-        # pymssql ignores the port whenever an instance is present, so adding
-        # ":1433" here would only produce a malformed "host\instance:1433".
+        # Named instances: only the *default* instance listens on 1433. With an
+        # instance name and no port we put "host\instance" into the server
+        # string and let SQL Browser (UDP 1434) resolve the dynamic port.
+        # A user-supplied port wins: FreeTDS then dials host:port directly,
+        # which is the only workaround when UDP 1434 is blocked. pymssql
+        # rejects specifying both an instance and a port at once, so the
+        # instance is dropped from the server string in that case.
         instance = str(ds.get("instance") or "").strip().strip("\\")
         if "\\" in instance:
-            instance = instance.split("\\", 1)[0].strip()
+            # Tolerate "HOST\INSTANCE" pasted into the 实例名 field: the
+            # instance is the last component.
+            instance = instance.rsplit("\\", 1)[-1].strip()
         if "\\" in host:
             # Tolerate users typing "host\instance" into the host field.
             host, host_instance = host.split("\\", 1)
             instance = instance or host_instance.split("\\", 1)[0].strip()
         host = host.strip()
-        if instance:
-            host = f"{host}\\{instance}"
-            port = 0
         # pymssql defaults login_timeout to 60 s; 10 s fails fast on an
         # unreachable host (user-overridable via connection params).
         extra = {
@@ -142,7 +144,11 @@ def build_engine_url(ds: Dict[str, Any]) -> str:
         }
         if params.get("tds_version"):
             extra["tds_version"] = params["tds_version"]
-        port_part = "" if instance else f":{port or 1433}"
+        if instance and not port:
+            port_part = ""
+            host = f"{host}\\{instance}"
+        else:
+            port_part = f":{port or 1433}"
         return f"mssql+pymssql://{user}:{pwd}@{host}{port_part}/{db}{qs(extra)}"
     if dtype == "db2":
         # IBM's official ibm_db_sa dialect; ibm_db wheels bundle the DB2
@@ -174,6 +180,20 @@ def build_engine_url(ds: Dict[str, Any]) -> str:
 
 def create_db_engine(ds: Dict[str, Any]) -> Engine:
     dtype = (ds.get("type") or "").lower()
+    if dtype != "custom":
+        # Every bundled driver resolves the host with the OS resolver; a
+        # computer name Windows resolves via NetBIOS (e.g. DESKTOP-E4G0H7L)
+        # fails on macOS/Linux and every driver then reports the same opaque
+        # "unable to connect". Raising a user-facing ValueError here keeps the
+        # test-connection message actionable and also improves the SQL and
+        # schema-load failures.
+        target_host = str(ds.get("host") or "localhost").split("\\", 1)[0].strip() or "localhost"
+        if _host_settles(target_host) is False:
+            raise ValueError(
+                f"主机名「{target_host}」无法解析（DNS / hosts 查不到）。"
+                "请改用服务器的 IP 地址；若必须使用计算机名，请将其加入路由器 DNS "
+                "或本机 hosts 文件。"
+            )
     url = build_engine_url(ds)
     engine_kwargs: Dict[str, Any] = {"pool_pre_ping": True, "future": True}
 
@@ -316,29 +336,72 @@ def _mssql_error_hint(ds: Dict[str, Any], detail: str) -> str:
     """Actionable next step for SQL Server connection failures."""
     host = ds.get("host") or "localhost"
     instance = str(ds.get("instance") or "").strip()
-    if instance:
+    if "\\" in host:
+        host, host_instance = host.split("\\", 1)
+        instance = instance or host_instance.strip()
+    if "\\" in instance:
+        instance = instance.rsplit("\\", 1)[-1].strip()
+    try:
+        port = int(ds.get("port") or 0)
+    except (TypeError, ValueError):
+        port = 0
+
+    if instance and port:
+        target = f"{host}:{port}（实例 {instance}）"
+    elif instance:
         target = f"{host}\\{instance}（端口由 SQL Browser 解析）"
-    elif "\\" in host:
-        target = f"{host}（端口由 SQL Browser 解析）"
     else:
-        try:
-            target_port = int(ds.get("port") or 1433)
-        except (TypeError, ValueError):
-            target_port = 1433
-        target = f"{host}:{target_port}"
+        target = f"{host}:{port or 1433}"
+
+    if _host_settles(host) is False:
+        return (f"连接目标: {target}。主机名「{host}」在本机无法解析（DNS / hosts 查不到）。"
+                "请改用服务器的 IP 地址；若必须使用计算机名，请将其加入路由器 DNS 或本机 hosts 文件。")
 
     low = detail.lower()
     if "login failed" in low:
         step = ("若密码无误，请确认 SQL Server 已启用「SQL Server 和 Windows 身份验证」"
                 "模式，且 sa 账号已启用（Navicat 可能用的是 Windows 认证）。")
+    elif instance and not port:
+        step = ("命名实例的端口由 SQL Server Browser 解析，连接不上通常是解析失败："
+                "① 服务器上「SQL Server Browser」服务需为运行状态；"
+                "② Windows 防火墙需放行 UDP 1434；"
+                "③ 若无法放行，可在「端口」栏直接填写该实例的 TCP 端口"
+                "（SQL Server 配置管理器 → SQL Server 网络配置 → TCP/IP → IP 地址）；"
+                "④ 确认主机名可解析，必要时改用 IP 地址。"
+                "SQL Server 2008 R2 等老版本还可在连接参数填 {\"tds_version\": \"7.3\"}。")
     elif (not detail or "未提供错误信息" in detail or "20009" in detail
           or "unable to connect" in low or "adaptive server" in low
           or "unknown error" in low):
-        step = ("若为命名实例，请填写「实例名」；否则确认 TCP/IP 协议已启用且该端口已监听。"
-                "SQL Server 2008 R2 可在连接参数填 {\"tds_version\": \"7.3\"}。")
+        step = ("请确认主机可达、TCP/IP 协议已启用且端口可访问（必要时用 IP 代替主机名）；"
+                "若该数据库是命名实例，请填写「实例名」或实例的实际端口。"
+                "SQL Server 2008 R2 等老版本可在连接参数填 {\"tds_version\": \"7.3\"}。")
     else:
         step = "SQL Server 2008 R2 等老版本可尝试在连接参数填 {\"tds_version\": \"7.3\"}。"
     return f"连接目标: {target}。{step}"
+
+
+def _host_settles(host: str, timeout: float = 3.0) -> Optional[bool]:
+    """True / False once the OS resolver answers; None if it takes too long.
+
+    Every bundled driver resolves the host with the OS resolver, so a computer
+    name Windows resolves via NetBIOS (e.g. ``DESKTOP-E4G0H7L``) fails on
+    macOS / Linux DNS with the same opaque "unable to connect" error as a
+    blocked port. Checking up front lets us name the real cause. A slow
+    resolver returns None and the normal connect attempt decides.
+    """
+    result: List[bool] = []
+
+    def work() -> None:
+        try:
+            socket.getaddrinfo(host, None)
+            result.append(True)
+        except OSError:
+            result.append(False)
+
+    t = threading.Thread(target=work, daemon=True)
+    t.start()
+    t.join(timeout)
+    return result[0] if result else None
 
 
 def test_connection(ds: Dict[str, Any]) -> Tuple[bool, str]:
